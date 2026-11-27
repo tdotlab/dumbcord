@@ -9,6 +9,8 @@
   let adding = $state(false);
   let newChannel = $state("");
 
+  const voice = porch.voice;
+
   const company = $derived([...porch.online].filter((u) => u !== porch.me).length);
   const porchLine = $derived(
     company === 0
@@ -73,6 +75,7 @@
         {#each porch.channels as name (name)}
           {@const key = `#${name}`}
           {@const conv = porch.convs[key]}
+          {@const sitting = voice.inRoom(key)}
           <li>
             <button
               class="row"
@@ -89,6 +92,23 @@
                 <span class="dot" aria-label="unread"></span>
               {/if}
             </button>
+            {#if sitting.length}
+              <button
+                class="voice-room"
+                class:mine={voice.room === key}
+                title={voice.room === key ? undefined : `Join voice in #${name}`}
+                disabled={voice.room === key}
+                onclick={() => voice.join(key)}
+              >
+                {#each sitting as m (m.user)}
+                  <span class="sitter" class:quiet={!m.live}>
+                    <Avatar name={m.user} size={20} speaking={voice.speaking.has(m.user)} />
+                    <span class="name">{m.user}</span>
+                    {#if m.muted}<span class="muted" title="Muted"><Icon name="mic-off" size={14} /></span>{/if}
+                  </span>
+                {/each}
+              </button>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -122,6 +142,29 @@
       </ul>
     </section>
   </div>
+
+  {#if voice.phase !== "idle" && voice.room}
+    <div class="voice-bar" role="status">
+      <span class="voice-dot" class:live={voice.phase === "live"} aria-hidden="true"></span>
+      <div class="voice-text">
+        <div class="voice-state">{voice.phase === "live" ? "Voice connected" : "Joining voice…"}</div>
+        <button class="voice-where" onclick={() => go(voice.room!)}>#{label(voice.room)}</button>
+      </div>
+      <button
+        class="icon"
+        class:off={voice.muted}
+        title={voice.muted ? "Unmute" : "Mute"}
+        aria-label={voice.muted ? "Unmute" : "Mute"}
+        aria-pressed={voice.muted}
+        onclick={() => voice.toggleMute()}
+      >
+        <Icon name={voice.muted ? "mic-off" : "mic"} size={18} />
+      </button>
+      <button class="icon leave" title="Leave voice" aria-label="Leave voice" onclick={() => voice.leave()}>
+        <Icon name="hangup" size={18} />
+      </button>
+    </div>
+  {/if}
 
   <footer class="me">
     <Avatar name={porch.me} size={32} lit={porch.status === "open"} />
@@ -316,6 +359,111 @@
   .icon:hover {
     background: var(--raise);
     color: var(--text);
+  }
+
+  .voice-room {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    width: 100%;
+    margin: 0.1rem 0 0.3rem;
+    padding: 0.25rem 0.6rem 0.25rem 2.1rem;
+    border: none;
+    border-radius: var(--radius-s);
+    background: none;
+    color: var(--muted);
+    text-align: left;
+  }
+
+  .voice-room:not(:disabled):hover {
+    background: var(--raise);
+    color: var(--text);
+  }
+
+  .voice-room:disabled {
+    cursor: default;
+  }
+
+  .voice-room.mine {
+    color: var(--text);
+  }
+
+  .sitter {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 1.6rem;
+    font-size: var(--t-small);
+  }
+
+  .sitter.quiet {
+    opacity: 0.55;
+  }
+
+  .muted {
+    display: grid;
+    color: var(--faint);
+  }
+
+  .voice-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.6rem 0.5rem 0.6rem 1rem;
+    border-top: 1px solid var(--line);
+    background: color-mix(in srgb, var(--haint) 6%, var(--sunk));
+  }
+
+  .voice-dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    margin-right: 0.3rem;
+    border-radius: 50%;
+    background: var(--faint);
+  }
+
+  .voice-dot.live {
+    background: var(--haint);
+    box-shadow: 0 0 8px var(--haint-deep);
+  }
+
+  .voice-text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .voice-state {
+    font-size: var(--t-small);
+    font-weight: 700;
+    color: var(--haint);
+  }
+
+  .voice-where {
+    display: block;
+    max-width: 100%;
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--faint);
+    font-size: var(--t-small);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .voice-where:hover {
+    color: var(--text);
+    text-decoration: underline;
+  }
+
+  .icon.off {
+    color: var(--error);
+  }
+
+  .icon.leave:hover {
+    background: var(--error-wash);
+    color: var(--error);
   }
 
   .me {

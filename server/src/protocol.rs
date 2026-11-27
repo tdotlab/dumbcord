@@ -16,6 +16,7 @@ pub const PROTOCOL_VERSION: u32 = 1;
 pub const MAX_TEXT_CHARS: usize = 2000;
 pub const MAX_FRAME_BYTES: usize = 64 * 1024;
 pub const HISTORY_PAGE: usize = 50;
+pub const MAX_SDP_BYTES: usize = 48 * 1024;
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -72,6 +73,33 @@ pub enum ClientMessage {
         id: i64,
     },
     Ping,
+    /// Take a seat in a channel's voice room, leaving any other room. This
+    /// connection's Realtime session is created here.
+    VoiceJoin {
+        rid: u32,
+        room: String,
+    },
+    /// Publish the microphone: an SDP offer and the transceiver's `mid`.
+    /// The reply carries the SDP answer.
+    VoicePublish {
+        rid: u32,
+        sdp: String,
+        mid: String,
+    },
+    /// Subscribe to these room members' microphones. The reply carries an SDP
+    /// offer to answer with `voice_answer`, and which `mid` is whose.
+    VoicePull {
+        rid: u32,
+        users: Vec<String>,
+    },
+    VoiceAnswer {
+        rid: u32,
+        sdp: String,
+    },
+    VoiceMute {
+        muted: bool,
+    },
+    VoiceLeave,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -87,6 +115,9 @@ pub enum ServerMessage {
         users: Vec<String>,
         online: Vec<String>,
         convs: Vec<ConvState>,
+        /// Whether this server has voice set up at all.
+        voice_enabled: bool,
+        voice: Vec<VoiceMember>,
     },
     Error {
         code: ErrorCode,
@@ -131,6 +162,43 @@ pub enum ServerMessage {
         id: i64,
     },
     Pong,
+    /// The answer to one `voice_*` request with a `rid`. `error` is set when it failed.
+    VoiceReply {
+        rid: u32,
+        sdp: Option<String>,
+        tracks: Vec<VoiceTrack>,
+        error: Option<String>,
+    },
+    /// Someone joined a voice room, started talking (`live`), or (un)muted.
+    VoiceState {
+        member: VoiceMember,
+    },
+    VoiceLeft {
+        user: String,
+    },
+    /// This connection lost its voice seat, e.g. to the same user joining
+    /// from another device.
+    VoiceEnded {
+        reason: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct VoiceMember {
+    pub user: String,
+    /// The channel, written `#name`.
+    pub room: String,
+    /// Their microphone is published and can be pulled.
+    pub live: bool,
+    pub muted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct VoiceTrack {
+    pub user: String,
+    pub mid: String,
 }
 
 /// One message as stored. For a DM, `to` is `@recipient` as the author wrote

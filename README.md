@@ -1,7 +1,7 @@
 # Porch
 
 A private place for a small group of friends to talk: channels, direct
-messages, presence, and (next) voice. One small Rust server, one Svelte
+messages, presence, and voice rooms. One small Rust server, one Svelte
 client that runs as a Windows app, an Android app, or a web page.
 
 It is built for a dozen to a few dozen people who know each other, on a
@@ -15,6 +15,7 @@ server one of them runs. It is not trying to be Discord.
 | `app/` | The client: Svelte 5 + TypeScript + Vite |
 | `app/src-tauri/` | Tauri 2 shell that turns the client into a desktop/Android app |
 | `docs/` | Architecture and design notes |
+| `scripts/voice_e2e.py` | Two-browser voice test against real Cloudflare Realtime (see its docstring) |
 
 ## Running it locally
 
@@ -39,12 +40,22 @@ Run the desktop app instead of the browser with `npm run tauri dev`.
 
 ```
 porch-server [--db porch.sqlite3] [--bind 127.0.0.1:7878] [--invite CODE] [--web-dir app/dist]
+             [--cf-app-id ID --cf-app-token TOKEN]
 porch-server passwd <user>    # new password from stdin; signs them out everywhere
 porch-server users            # list accounts
 ```
 
 Each flag also reads an environment variable: `PORCH_DB`, `PORCH_BIND`,
-`PORCH_INVITE`, `PORCH_WEB_DIR`. Logging follows `RUST_LOG`.
+`PORCH_INVITE`, `PORCH_WEB_DIR`, `PORCH_CF_APP_ID`, `PORCH_CF_APP_TOKEN`.
+Logging follows `RUST_LOG`.
+
+Voice runs through a Cloudflare Realtime SFU app (Cloudflare dashboard,
+Realtime, SFU). Give the server its app ID and token, preferably through the
+environment so the token stays out of shell history; without both, voice is
+off and the client hides it. Browsers only hand over a microphone on `https://`
+or `localhost`, so voice over the internet needs the TLS proxy below.
+Cloudflare bills SFU egress past the free monthly allowance, so set a usage
+alert on the account.
 
 The server speaks plain `ws://`. On the internet, put a TLS proxy such as
 Caddy in front of it so clients connect over `wss://`. `--web-dir` serves the

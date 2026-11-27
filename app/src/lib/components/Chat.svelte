@@ -15,6 +15,8 @@
   const conv = $derived(porch.convs[key]);
   const isDm = $derived(key.startsWith("@"));
   const peer = $derived(label(key));
+  const voice = porch.voice;
+  const inVoiceHere = $derived(voice.room === key && voice.phase !== "idle");
   const elsewhere = $derived(
     Object.values(porch.convs).filter((c) => c.key !== key && c.attention > 0).length,
   );
@@ -37,6 +39,23 @@
         <h1>{peer}</h1>
       {/if}
     </div>
+
+    {#if !isDm && voice.enabled}
+      <button
+        class="icon voice"
+        class:on={inVoiceHere}
+        type="button"
+        title={inVoiceHere ? "Leave voice" : `Join voice in #${peer}`}
+        aria-label={inVoiceHere ? "Leave voice" : "Join voice"}
+        aria-pressed={inVoiceHere}
+        onclick={() => (inVoiceHere ? voice.leave() : voice.join(key))}
+      >
+        <Icon name="headphones" size={20} />
+        {#if voice.inRoom(key).length && !inVoiceHere}
+          <span class="count">{voice.inRoom(key).length}</span>
+        {/if}
+      </button>
+    {/if}
 
     <button
       class="icon people"
@@ -141,6 +160,21 @@
   .menu {
     display: none;
     margin-left: -0.6rem;
+  }
+
+  .count {
+    position: absolute;
+    top: 0.2rem;
+    right: 0.1rem;
+    min-width: 1rem;
+    padding: 0 0.2rem;
+    border-radius: 999px;
+    background: var(--porchlight);
+    color: #2a2112;
+    font-size: 0.65rem;
+    font-weight: 700;
+    line-height: 1rem;
+    box-shadow: 0 0 0 2px var(--night);
   }
 
   .pip {

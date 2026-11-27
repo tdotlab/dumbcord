@@ -2,7 +2,7 @@ use std::{io::BufRead, path::PathBuf};
 
 use anyhow::{bail, Context};
 use clap::{Parser, Subcommand};
-use porch_server::{auth, serve, store::Store, validate, Config, Limits};
+use porch_server::{auth, serve, store::Store, validate, voice::RealtimeConfig, Config, Limits};
 use tokio::net::TcpListener;
 
 #[derive(Parser)]
@@ -32,6 +32,14 @@ struct ServeArgs {
     /// Serve the built web client from this folder.
     #[arg(long, env = "PORCH_WEB_DIR")]
     web_dir: Option<PathBuf>,
+
+    /// Cloudflare Realtime SFU app ID. Voice is off unless this and the token are set.
+    #[arg(long, env = "PORCH_CF_APP_ID")]
+    cf_app_id: Option<String>,
+
+    /// Cloudflare Realtime SFU app token. Prefer the environment variable.
+    #[arg(long, env = "PORCH_CF_APP_TOKEN", hide_env_values = true)]
+    cf_app_token: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -60,7 +68,21 @@ async fn main() -> anyhow::Result<()> {
                 bind,
                 invite,
                 web_dir,
+                cf_app_id,
+                cf_app_token,
             } = cli.serve;
+            let realtime = match (cf_app_id, cf_app_token) {
+                (Some(app_id), Some(app_token)) => Some(RealtimeConfig {
+                    base_url: RealtimeConfig::BASE_URL.into(),
+                    app_id,
+                    app_token,
+                }),
+                (None, None) => None,
+                _ => bail!("set both PORCH_CF_APP_ID and PORCH_CF_APP_TOKEN for voice, or neither"),
+            };
+            if realtime.is_none() {
+                tracing::info!("voice is off: no Cloudflare Realtime app configured");
+            }
             if invite.is_none() {
                 tracing::warn!("no invite code set: anyone who can reach this server can register");
             }
@@ -75,6 +97,7 @@ async fn main() -> anyhow::Result<()> {
                 db_path: cli.db,
                 invite,
                 web_dir,
+                realtime,
                 limits: Limits::default(),
             };
             serve(listener, cfg, async {

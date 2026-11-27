@@ -7,6 +7,7 @@ import { appIsVisible, notify } from "./platform";
 import type { ChatMessage } from "./protocol/ChatMessage";
 import type { ClientMessage } from "./protocol/ClientMessage";
 import type { ServerMessage } from "./protocol/ServerMessage";
+import { Voice } from "./voice.svelte";
 
 export interface Msg extends ChatMessage {
   nonce?: string;
@@ -65,6 +66,10 @@ class Porch {
   typing = $state<Record<string, Record<string, number>>>({});
   drafts = $state<Record<string, string>>({});
   editing = $state<number | null>(null);
+  voice = new Voice(
+    (msg) => this.send(msg),
+    (message) => this.toast(message),
+  );
 
   /** DM conversations with any history, most recent first. */
   dms = $derived(
@@ -129,6 +134,7 @@ class Porch {
     this.typing = {};
     this.drafts = {};
     this.editing = null;
+    this.voice.reset();
     this.busy = false;
     this.authError = why;
     this.phase = "signed-out";
@@ -160,6 +166,7 @@ class Porch {
   private onStatus(s: ConnStatus) {
     this.status = s;
     if (s === "closed") {
+      this.voice.onDisconnect();
       for (const conv of Object.values(this.convs)) {
         for (const m of conv.messages) if (m.state === "pending") m.state = "failed";
       }
@@ -243,6 +250,11 @@ class Porch {
       }
       case "pong":
         return;
+      case "voice_reply":
+      case "voice_state":
+      case "voice_left":
+      case "voice_ended":
+        return this.voice.onMessage(msg);
     }
   }
 
@@ -256,6 +268,7 @@ class Porch {
     setKnownUsers(msg.users);
     this.online.clear();
     for (const u of msg.online) this.online.add(u);
+    this.voice.onWelcome(msg.user, msg.voice_enabled, msg.voice);
 
     // Anything loaded before a reconnect may have gaps: reload on demand.
     for (const conv of Object.values(this.convs)) {

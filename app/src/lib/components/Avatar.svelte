@@ -14,12 +14,14 @@
     name,
     size = 36,
     lit = false,
-  }: { name: string; size?: number; lit?: boolean } = $props();
+    speaking = false,
+  }: { name: string; size?: number; lit?: boolean; speaking?: boolean } = $props();
 </script>
 
 <span
   class="avatar"
   class:lit
+  class:speaking
   style:--tone={toneOf(name)}
   style:width="{size}px"
   style:height="{size}px"
@@ -41,6 +43,19 @@
     font-family: var(--serif);
     line-height: 1;
     user-select: none;
+  }
+
+  /* Talking in voice: a porchlight ring, quick on and a little slower off. */
+  .avatar {
+    transition: box-shadow 160ms ease-out;
+  }
+
+  .speaking {
+    box-shadow:
+      0 0 0 2px var(--boards),
+      0 0 0 4px var(--porchlight),
+      0 0 12px 3px var(--porchlight-glow);
+    transition-duration: 60ms;
   }
 
   /* A small lit bulb at the shoulder: this person is on the porch. */

@@ -12,11 +12,14 @@ ceiling, one lamp on. Calm, warm, a little homemade. Not a gamer app, not a SaaS
 | `--raise` | `#2c3449` | Hover, inputs, toasts |
 | `--sunk` | `#181d2a` | Wells, code |
 | `--haint` | `#9fd8cb` | Haint blue: selection, focus, the send button |
-| `--porchlight` | `#f2c46d` | Amber: presence, unread, mentions. Nothing else. |
+| `--porchlight` | `#f2c46d` | Amber: presence, unread, mentions, who is talking. Nothing else. |
 
 Amber is rationed. If something is amber, it is about a person: they are here, they
-said something you haven't read, or they said your name. Don't spend it on buttons or
-decoration.
+said something you haven't read, they said your name, or they are talking right now
+(the glowing ring on a voice avatar, and the head count on a channel's voice button).
+Don't spend it on buttons or decoration. Your own voice connection is a state, not a
+person, so the voice bar at the foot of the sidebar is haint blue; Mute turns red only
+while you are muted.
 
 ## The lantern
 
@@ -33,8 +36,9 @@ and conversation titles. Sentence case throughout, no all-caps labels.
 ## Copy
 
 Plain and a little warm, matching the porch idea where it fits naturally: "On the
-porch" for online, "Inside" for offline, "Just you out here" when alone. Errors say
-what happened and what to do. Don't force the metaphor into every string.
+porch" for online, "Inside" for offline, "Just you out here" when alone. Voice is
+"Join voice" and "Leave voice", "Voice connected" once you're in. Errors say what
+happened and what to do. Don't force the metaphor into every string.
 
 ## Motion
 

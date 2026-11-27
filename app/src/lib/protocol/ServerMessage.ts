@@ -2,5 +2,11 @@
 import type { ChatMessage } from "./ChatMessage";
 import type { ConvState } from "./ConvState";
 import type { ErrorCode } from "./ErrorCode";
+import type { VoiceMember } from "./VoiceMember";
+import type { VoiceTrack } from "./VoiceTrack";
 
-export type ServerMessage = { "type": "welcome", protocol: number, user: string, token: string, channels: Array<string>, users: Array<string>, online: Array<string>, convs: Array<ConvState>, } | { "type": "error", code: ErrorCode, message: string, } | { "type": "history", to: string, messages: Array<ChatMessage>, has_more: boolean, } | { "type": "message", message: ChatMessage, nonce: string | null, } | { "type": "edited", message: ChatMessage, } | { "type": "deleted", id: number, to: string, author: string, } | { "type": "channel_created", name: string, } | { "type": "user_joined", user: string, } | { "type": "presence", user: string, online: boolean, } | { "type": "typing", user: string, to: string, } | { "type": "read", to: string, id: number, } | { "type": "pong" };
+export type ServerMessage = { "type": "welcome", protocol: number, user: string, token: string, channels: Array<string>, users: Array<string>, online: Array<string>, convs: Array<ConvState>, 
+/**
+ * Whether this server has voice set up at all.
+ */
+voice_enabled: boolean, voice: Array<VoiceMember>, } | { "type": "error", code: ErrorCode, message: string, } | { "type": "history", to: string, messages: Array<ChatMessage>, has_more: boolean, } | { "type": "message", message: ChatMessage, nonce: string | null, } | { "type": "edited", message: ChatMessage, } | { "type": "deleted", id: number, to: string, author: string, } | { "type": "channel_created", name: string, } | { "type": "user_joined", user: string, } | { "type": "presence", user: string, online: boolean, } | { "type": "typing", user: string, to: string, } | { "type": "read", to: string, id: number, } | { "type": "pong" } | { "type": "voice_reply", rid: number, sdp: string | null, tracks: Array<VoiceTrack>, error: string | null, } | { "type": "voice_state", member: VoiceMember, } | { "type": "voice_left", user: string, } | { "type": "voice_ended", reason: string, };

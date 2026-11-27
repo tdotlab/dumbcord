@@ -7,5 +7,6 @@ pub mod protocol;
 pub mod server;
 pub mod store;
 pub mod validate;
+pub mod voice;
 
 pub use server::{router, serve, App, Config, Limits};

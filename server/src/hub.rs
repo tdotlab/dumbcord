@@ -5,14 +5,14 @@
 //! to close. One stalled client can no longer freeze everyone else.
 
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     sync::{Arc, Mutex, MutexGuard},
 };
 
 use axum::extract::ws::Utf8Bytes;
 use tokio::sync::{mpsc, Notify};
 
-use crate::validate::dm_members;
+use crate::{protocol::VoiceMember, validate::dm_members};
 
 pub type ConnId = u64;
 
@@ -36,11 +36,35 @@ struct Conn {
     out: Outbox,
 }
 
+/// A user's place in a voice room. One per user: joining from a second
+/// device moves the seat there.
+#[derive(Debug, Clone)]
+pub struct Seat {
+    pub conn: ConnId,
+    pub room: String,
+    /// The Realtime session behind this connection's PeerConnection.
+    pub session: String,
+    pub live: bool,
+    pub muted: bool,
+}
+
+impl Seat {
+    pub fn member(&self, user: &str) -> VoiceMember {
+        VoiceMember {
+            user: user.to_owned(),
+            room: self.room.clone(),
+            live: self.live,
+            muted: self.muted,
+        }
+    }
+}
+
 #[derive(Default)]
 struct Inner {
     next_id: ConnId,
     conns: HashMap<ConnId, Conn>,
     by_user: HashMap<String, Vec<ConnId>>,
+    seats: BTreeMap<String, Seat>,
 }
 
 #[derive(Default)]
@@ -84,6 +108,65 @@ impl Hub {
             inner.by_user.remove(&conn.user);
         }
         Some((conn.user, offline))
+    }
+
+    // ---- voice seats ----------------------------------------------------
+
+    /// Seat a connection, replacing the user's previous seat. Returns the
+    /// connection that held it before, if it was a different one.
+    pub fn sit(&self, user: &str, seat: Seat) -> Option<Outbox> {
+        let mut inner = self.lock();
+        let conn = seat.conn;
+        let old = inner.seats.insert(user.to_owned(), seat)?;
+        (old.conn != conn)
+            .then(|| inner.conns.get(&old.conn).map(|c| c.out.clone()))
+            .flatten()
+    }
+
+    /// This connection's seat, if it holds one.
+    pub fn seat(&self, user: &str, conn: ConnId) -> Option<Seat> {
+        self.lock()
+            .seats
+            .get(user)
+            .filter(|s| s.conn == conn)
+            .cloned()
+    }
+
+    /// Any user's seat.
+    pub fn seat_of(&self, user: &str) -> Option<Seat> {
+        self.lock().seats.get(user).cloned()
+    }
+
+    /// Change this connection's seat in place; returns the new member state.
+    pub fn update_seat(
+        &self,
+        user: &str,
+        conn: ConnId,
+        f: impl FnOnce(&mut Seat),
+    ) -> Option<VoiceMember> {
+        let mut inner = self.lock();
+        let seat = inner.seats.get_mut(user).filter(|s| s.conn == conn)?;
+        f(seat);
+        Some(seat.member(user))
+    }
+
+    /// Give up this connection's seat. True if it held one.
+    pub fn stand(&self, user: &str, conn: ConnId) -> bool {
+        let mut inner = self.lock();
+        if inner.seats.get(user).is_some_and(|s| s.conn == conn) {
+            inner.seats.remove(user);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn voice_roster(&self) -> Vec<VoiceMember> {
+        self.lock()
+            .seats
+            .iter()
+            .map(|(user, seat)| seat.member(user))
+            .collect()
     }
 
     pub fn online(&self) -> Vec<String> {

@@ -23,10 +23,14 @@ use tower_http::services::{ServeDir, ServeFile};
 use crate::{
     auth::{self, Bucket, Throttle},
     error::{Error, Result},
-    hub::{ConnId, Hub, Outbox},
-    protocol::{ClientMessage, ErrorCode, ServerMessage, MAX_FRAME_BYTES, PROTOCOL_VERSION},
+    hub::{ConnId, Hub, Outbox, Seat},
+    protocol::{
+        ClientMessage, ErrorCode, ServerMessage, VoiceTrack, MAX_FRAME_BYTES, MAX_SDP_BYTES,
+        PROTOCOL_VERSION,
+    },
     store::Store,
     validate::{self, Target},
+    voice::{Realtime, RealtimeConfig},
 };
 
 /// Tunables. Defaults suit a small group on a small VPS; tests shrink them.
@@ -71,6 +75,8 @@ pub struct Config {
     pub invite: Option<String>,
     /// Serve the built web client from here, if set.
     pub web_dir: Option<PathBuf>,
+    /// Cloudflare Realtime credentials. Without them voice is switched off.
+    pub realtime: Option<RealtimeConfig>,
     pub limits: Limits,
 }
 
@@ -80,6 +86,7 @@ pub struct App {
     invite_hash: Option<[u8; 32]>,
     throttle: Throttle,
     hashing: Semaphore,
+    realtime: Option<Realtime>,
     limits: Limits,
 }
 
@@ -95,6 +102,7 @@ impl App {
                 .map(|s| Sha256::digest(s.as_bytes()).into()),
             throttle: Throttle::new(cfg.limits.login_failures, cfg.limits.login_window),
             hashing: Semaphore::new(cfg.limits.hash_concurrency.max(1)),
+            realtime: cfg.realtime.as_ref().map(Realtime::new).transpose()?,
             limits: cfg.limits.clone(),
         }))
     }
@@ -199,6 +207,7 @@ struct Session {
     auth_failures: u32,
     sends: Bucket,
     typing: Bucket,
+    voice: Bucket,
 }
 
 async fn session(app: Arc<App>, socket: WebSocket) {
@@ -231,6 +240,7 @@ async fn session(app: Arc<App>, socket: WebSocket) {
         auth_failures: 0,
         sends: Bucket::new(app.limits.send_burst, app.limits.send_per_sec),
         typing: Bucket::new(4.0, 1.0),
+        voice: Bucket::new(30.0, 3.0),
         app,
     };
     let idle = s.app.limits.idle_timeout;
@@ -352,6 +362,24 @@ impl Session {
             C::Delete { id } => self.delete(id).await?,
             C::Typing { to } => self.typing(to)?,
             C::MarkRead { to, id } => self.mark_read(to, id).await?,
+            C::VoiceJoin { rid, room } => {
+                let r = self.voice_join(room).await;
+                self.voice_reply(rid, r);
+            }
+            C::VoicePublish { rid, sdp, mid } => {
+                let r = self.voice_publish(sdp, mid).await;
+                self.voice_reply(rid, r);
+            }
+            C::VoicePull { rid, users } => {
+                let r = self.voice_pull(users).await;
+                self.voice_reply(rid, r);
+            }
+            C::VoiceAnswer { rid, sdp } => {
+                let r = self.voice_answer(sdp).await;
+                self.voice_reply(rid, r);
+            }
+            C::VoiceMute { muted } => self.voice_mute(muted)?,
+            C::VoiceLeave => self.voice_leave()?,
         }
         Ok(Flow::Continue)
     }
@@ -471,6 +499,8 @@ impl Session {
             users,
             online,
             convs,
+            voice_enabled: self.app.realtime.is_some(),
+            voice: self.app.hub.voice_roster(),
         });
         let (id, first) = self.app.hub.attach(&user, self.out.clone(), welcome);
         if first {
@@ -490,6 +520,14 @@ impl Session {
         let Some(signed) = self.signed.take() else {
             return;
         };
+        if self.app.hub.stand(&signed.user, signed.id) {
+            self.app.hub.to_all(
+                &frame(&ServerMessage::VoiceLeft {
+                    user: signed.user.clone(),
+                }),
+                None,
+            );
+        }
         if let Some((user, offline)) = self.app.hub.detach(signed.id) {
             if offline {
                 let presence = frame(&ServerMessage::Presence {
@@ -637,6 +675,180 @@ impl Session {
             self.app
                 .hub
                 .to_users(&[&me], &frame(&ServerMessage::Read { to, id }), Some(conn));
+        }
+        Ok(())
+    }
+
+    // ---- voice ----------------------------------------------------------
+
+    fn voice_reply(&self, rid: u32, result: Result<(Option<String>, Vec<VoiceTrack>)>) {
+        let msg = match result {
+            Ok((sdp, tracks)) => ServerMessage::VoiceReply {
+                rid,
+                sdp,
+                tracks,
+                error: None,
+            },
+            Err(err) => {
+                if let Error::Internal(e) = &err {
+                    tracing::error!(user = self.user().unwrap_or("-"), "voice failed: {e:#}");
+                }
+                ServerMessage::VoiceReply {
+                    rid,
+                    sdp: None,
+                    tracks: Vec::new(),
+                    error: Some(err.public().1),
+                }
+            }
+        };
+        self.reply(&msg);
+    }
+
+    /// The signed-in user and this connection, once voice is known to be on
+    /// and the request is within the rate limit.
+    fn voice_ready(&mut self) -> Result<(String, ConnId)> {
+        let signed = self.require_user()?;
+        let who = (signed.user.clone(), signed.id);
+        if self.app.realtime.is_none() {
+            return Err(Error::user(
+                ErrorCode::NotFound,
+                "Voice isn't set up on this server.",
+            ));
+        }
+        if !self.voice.take() {
+            return Err(Error::user(ErrorCode::RateLimited, "Slow down a little."));
+        }
+        Ok(who)
+    }
+
+    fn realtime(&self) -> &Realtime {
+        self.app
+            .realtime
+            .as_ref()
+            .expect("voice_ready checked realtime")
+    }
+
+    fn my_seat(&self, me: &str, conn: ConnId) -> Result<Seat> {
+        self.app
+            .hub
+            .seat(me, conn)
+            .ok_or_else(|| Error::bad("Join a voice room first."))
+    }
+
+    fn check_sdp(sdp: &str) -> Result<()> {
+        if sdp.is_empty() || sdp.len() > MAX_SDP_BYTES {
+            return Err(Error::bad("That session description doesn't look right."));
+        }
+        Ok(())
+    }
+
+    async fn voice_join(&mut self, room: String) -> Result<(Option<String>, Vec<VoiceTrack>)> {
+        let (me, conn) = self.voice_ready()?;
+        let room = match self.conv(&room).await?.0 {
+            Target::Channel(name) => format!("#{name}"),
+            Target::Dm(_) => return Err(Error::bad("Voice rooms belong to channels.")),
+        };
+        let session = self.realtime().new_session().await?;
+        let seat = Seat {
+            conn,
+            room,
+            session,
+            live: false,
+            muted: false,
+        };
+        let member = seat.member(&me);
+        if let Some(old) = self.app.hub.sit(&me, seat) {
+            old.push(frame(&ServerMessage::VoiceEnded {
+                reason: "You joined voice on another device.".into(),
+            }));
+        }
+        tracing::info!(user = me, room = member.room, "joined voice");
+        self.app
+            .hub
+            .to_all(&frame(&ServerMessage::VoiceState { member }), None);
+        Ok((None, Vec::new()))
+    }
+
+    async fn voice_publish(
+        &mut self,
+        sdp: String,
+        mid: String,
+    ) -> Result<(Option<String>, Vec<VoiceTrack>)> {
+        let (me, conn) = self.voice_ready()?;
+        Self::check_sdp(&sdp)?;
+        if mid.is_empty() || mid.len() > 32 {
+            return Err(Error::bad("That track id doesn't look right."));
+        }
+        let seat = self.my_seat(&me, conn)?;
+        let answer = self.realtime().publish(&seat.session, &sdp, &mid).await?;
+        if let Some(member) = self.app.hub.update_seat(&me, conn, |s| s.live = true) {
+            self.app
+                .hub
+                .to_all(&frame(&ServerMessage::VoiceState { member }), None);
+        }
+        Ok((Some(answer), Vec::new()))
+    }
+
+    async fn voice_pull(
+        &mut self,
+        users: Vec<String>,
+    ) -> Result<(Option<String>, Vec<VoiceTrack>)> {
+        let (me, conn) = self.voice_ready()?;
+        let seat = self.my_seat(&me, conn)?;
+        let mut wanted: Vec<(String, String)> = Vec::new();
+        for user in users.into_iter().take(32) {
+            if user == me || wanted.iter().any(|(u, _)| *u == user) {
+                continue;
+            }
+            if let Some(theirs) = self.app.hub.seat_of(&user) {
+                if theirs.room == seat.room && theirs.live {
+                    wanted.push((user, theirs.session));
+                }
+            }
+        }
+        if wanted.is_empty() {
+            return Ok((None, Vec::new()));
+        }
+        let sessions: Vec<String> = wanted.iter().map(|(_, s)| s.clone()).collect();
+        let pulled = self.realtime().pull(&seat.session, &sessions).await?;
+        let tracks = pulled
+            .tracks
+            .into_iter()
+            .filter_map(|t| {
+                let user = wanted.iter().find(|(_, s)| *s == t.session)?.0.clone();
+                Some(VoiceTrack { user, mid: t.mid })
+            })
+            .collect();
+        Ok((pulled.offer, tracks))
+    }
+
+    async fn voice_answer(&mut self, sdp: String) -> Result<(Option<String>, Vec<VoiceTrack>)> {
+        let (me, conn) = self.voice_ready()?;
+        Self::check_sdp(&sdp)?;
+        let seat = self.my_seat(&me, conn)?;
+        self.realtime().renegotiate(&seat.session, &sdp).await?;
+        Ok((None, Vec::new()))
+    }
+
+    fn voice_mute(&mut self, muted: bool) -> Result<()> {
+        let signed = self.require_user()?;
+        let (me, conn) = (signed.user.clone(), signed.id);
+        if let Some(member) = self.app.hub.update_seat(&me, conn, |s| s.muted = muted) {
+            self.app
+                .hub
+                .to_all(&frame(&ServerMessage::VoiceState { member }), None);
+        }
+        Ok(())
+    }
+
+    fn voice_leave(&mut self) -> Result<()> {
+        let signed = self.require_user()?;
+        if self.app.hub.stand(&signed.user, signed.id) {
+            let user = signed.user.clone();
+            tracing::info!(user, "left voice");
+            self.app
+                .hub
+                .to_all(&frame(&ServerMessage::VoiceLeft { user }), None);
         }
         Ok(())
     }
