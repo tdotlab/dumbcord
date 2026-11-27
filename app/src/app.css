@@ -1,77 +1,63 @@
 /*
-  Porch at dusk.
-  Night is the slate of a porch after sundown, not a void. Haint blue is the
-  porch-ceiling paint and marks where you are. Porchlight amber is rationed:
-  it means someone is here, something is new, or someone said your name.
-*/
-@import "@fontsource-variable/atkinson-hyperlegible-next/wght.css";
-@import "@fontsource-variable/atkinson-hyperlegible-next/wght-italic.css";
-@import "@fontsource/young-serif/latin-400.css";
+ * Porch looks like the tool it grew out of: the old egui DumbCord window.
+ * One flat charcoal surface, 1px separators, black wells for typing, grey
+ * square-ish buttons, Ubuntu type with light headings. One blue for "this is
+ * selected", one orange for "this wants you", green only for live voice.
+ * No shadows, gradients or glows. See docs/DESIGN.md.
+ */
+
+@import "@fontsource/ubuntu/300.css";
+@import "@fontsource/ubuntu/400.css";
+@import "@fontsource/ubuntu/500.css";
 
 :root {
-  --night: #1e2433;
-  --boards: #232a3c;
-  --boards-edge: #2a3247;
-  --raise: #2c3449;
-  --raise-hover: #343d55;
-  --sunk: #181d2a;
-  --line: rgba(231, 233, 238, 0.07);
-  --line-strong: rgba(231, 233, 238, 0.13);
+  --bg: #1b1b1b;
+  --well: #0a0a0a;
+  --line: #3c3c3c;
+  --button: #3c3c3c;
+  --button-hover: #464646;
+  --button-press: #373737;
+  --button-text: #c8c8c8;
+  --hover: rgba(255, 255, 255, 0.05);
 
-  --haint: #9fd8cb;
-  --haint-deep: #5fa99a;
-  --haint-wash: rgba(159, 216, 203, 0.11);
-  --porchlight: #f2c46d;
-  --porchlight-wash: rgba(242, 196, 109, 0.12);
-  --porchlight-glow: rgba(242, 196, 109, 0.35);
+  --text: #a8a8a8;
+  --strong: #e6e6e6;
+  --weak: #858585;
 
-  --text: #e7e9ee;
-  --muted: #9aa3b5;
-  --faint: #6b7489;
-  --error: #e07a6b;
-  --error-wash: rgba(224, 122, 107, 0.12);
+  --select: #005c80;
+  --select-text: #c0deff;
+  --link: #5aaaff;
+  --attention: #ff8f00;
+  --error: #ef6a5e;
+  --live: #6cc070;
 
-  --sans: "Atkinson Hyperlegible Next Variable", system-ui, sans-serif;
-  --serif: "Young Serif", Georgia, serif;
-  --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
-
-  /* type scale, 15px body on a 1.2 ratio */
-  --t-small: 0.8125rem;
-  --t-body: 0.9375rem;
-  --t-lead: 1.125rem;
-  --t-title: 1.375rem;
-  --t-display: 3.25rem;
-
-  --radius-s: 6px;
-  --radius-m: 10px;
-  --sidebar-w: 248px;
-  --members-w: 224px;
+  --font: "Ubuntu", system-ui, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --radius: 2px;
+  --sidebar-w: 232px;
+  --pad: 12px;
 
   color-scheme: dark;
 }
 
-*,
-*::before,
-*::after {
+* {
   box-sizing: border-box;
 }
 
 html,
-body {
-  margin: 0;
-  height: 100%;
-  background: var(--night);
-  color: var(--text);
-  font-family: var(--sans);
-  font-size: 16px;
-  line-height: 1.45;
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
-  overflow: hidden;
-}
-
+body,
 #app {
   height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 400 14px/1.45 var(--font);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overflow: hidden;
 }
 
 button,
@@ -85,35 +71,110 @@ button {
   cursor: pointer;
 }
 
-:focus-visible {
-  outline: 2px solid var(--haint);
-  outline-offset: 2px;
-}
-
-::selection {
-  background: rgba(159, 216, 203, 0.3);
-}
-
-/* Quiet scrollbars that still show where you are. */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--raise-hover) transparent;
-}
-
-.visually-hidden {
-  position: absolute !important;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
+/* The egui button: flat grey, a light outline on hover, darker when pressed. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 2px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: var(--button);
+  color: var(--button-text);
+  font-size: 13px;
   white-space: nowrap;
 }
 
+.btn:hover:not(:disabled) {
+  border-color: #969696;
+  background: var(--button-hover);
+  color: var(--strong);
+}
+
+.btn:active:not(:disabled) {
+  background: var(--button-press);
+}
+
+.btn:disabled {
+  color: #6a6a6a;
+  cursor: default;
+}
+
+.btn.on {
+  background: var(--select);
+  color: var(--select-text);
+}
+
+/* Black wells for anything you type into. */
+.field {
+  width: 100%;
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--well);
+  color: var(--strong);
+  outline: none;
+}
+
+.field::placeholder {
+  color: #6a6a6a;
+}
+
+.field:focus {
+  border-color: var(--select);
+}
+
+:focus-visible {
+  outline: 1px solid var(--link);
+  outline-offset: 1px;
+}
+
+.field:focus-visible {
+  outline: none;
+}
+
+/* egui's heading: big, light, upper case ("CHANNELS", "PEOPLE"). */
+.head {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 300;
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: #9a9a9a;
+}
+
+.sep {
+  height: 1px;
+  border: 0;
+  margin: 0;
+  background: var(--line);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+::selection {
+  background: var(--select);
+  color: var(--select-text);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #4a4a4a transparent;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
+  * {
+    transition: none !important;
+    scroll-behavior: auto !important;
   }
 }

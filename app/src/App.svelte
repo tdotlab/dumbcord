@@ -1,26 +1,20 @@
-<script lang="ts">
-  import { porch } from "./lib/porch.svelte";
+<script>
+  import { porch } from "./lib/porch.svelte.js";
+  import { hostOf } from "./lib/conn.js";
   import Chat from "./lib/components/Chat.svelte";
   import Login from "./lib/components/Login.svelte";
-  import Members from "./lib/components/Members.svelte";
-  import PorchLight from "./lib/components/PorchLight.svelte";
   import Sidebar from "./lib/components/Sidebar.svelte";
 
-  type Drawer = "none" | "nav" | "members";
+  let menuOpen = $state(false);
 
-  let drawer = $state<Drawer>("none");
-  let membersOpen = $state(localStorage.getItem("porch.members") !== "hidden");
-  let narrow = $state(false);
-
-  $effect(() => {
-    const mq = window.matchMedia("(max-width: 760px)");
-    const update = () => {
-      narrow = mq.matches;
-      drawer = "none";
-    };
-    update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
+  const host = $derived(hostOf(porch.server));
+  // The status line: a passing notice wins, then trouble, then the usual.
+  const status = $derived.by(() => {
+    if (porch.notice) return { text: porch.notice, tone: "notice" };
+    if (porch.phase === "signed-out") return { text: "Not signed in", tone: "" };
+    if (porch.phase === "resuming") return { text: `Connecting to ${host}...`, tone: "" };
+    if (porch.status !== "open") return { text: `Reconnecting to ${host}...`, tone: "warn" };
+    return { text: `Connected to ${host} as ${porch.me}`, tone: "" };
   });
 
   $effect(() => {
@@ -28,139 +22,160 @@
     document.title = waiting ? `(${waiting}) Porch` : "Porch";
   });
 
-  function togglePeople() {
-    if (narrow) {
-      drawer = drawer === "members" ? "none" : "members";
-    } else {
-      membersOpen = !membersOpen;
-      localStorage.setItem("porch.members", membersOpen ? "shown" : "hidden");
-    }
-  }
-
-  const close = () => (drawer = "none");
+  $effect(() => {
+    const mq = window.matchMedia("(max-width: 700px)");
+    const shut = () => (menuOpen = false);
+    mq.addEventListener("change", shut);
+    return () => mq.removeEventListener("change", shut);
+  });
 </script>
 
-<svelte:window onkeydown={(e) => e.key === "Escape" && drawer !== "none" && close()} />
+<svelte:window onkeydown={(e) => e.key === "Escape" && menuOpen && (menuOpen = false)} />
 
-{#if porch.phase === "signed-out"}
-  <Login />
-{:else if porch.phase === "resuming"}
-  <main class="splash" aria-busy="true">
-    <PorchLight height={110} company={2} lightUp />
-    <p>Porch</p>
-  </main>
-{:else}
-  <div
-    class="shell"
-    class:members-open={membersOpen && !narrow}
-    class:nav-drawer={drawer === "nav"}
-    class:members-drawer={drawer === "members"}
-  >
-    <div class="nav-col">
-      <Sidebar onnavigate={close} />
-    </div>
-    <main class="chat-col">
-      <Chat
-        onmenu={() => (drawer = drawer === "nav" ? "none" : "nav")}
-        onpeople={togglePeople}
-        peopleOpen={narrow ? drawer === "members" : membersOpen}
-      />
-    </main>
-    <div class="members-col">
-      <Members onnavigate={close} />
-    </div>
-    {#if drawer !== "none"}
-      <button class="scrim" type="button" aria-label="Close" onclick={close}></button>
+<div class="window">
+  <header class="bar">
+    {#if porch.phase === "ready"}
+      <button class="btn menu" type="button" aria-expanded={menuOpen} onclick={() => (menuOpen = !menuOpen)}>
+        Menu
+      </button>
     {/if}
-  </div>
-{/if}
+    <span class="wordmark">PORCH</span>
+    <span class="rule" aria-hidden="true"></span>
+    <span class="status {status.tone}" role="status" title={status.text}>{status.text}</span>
+    {#if porch.phase !== "signed-out"}
+      <button class="btn" type="button" onclick={() => porch.signOut()}>Sign out</button>
+    {/if}
+  </header>
 
-{#if porch.notice}
-  <div class="toast" role="status">{porch.notice}</div>
-{/if}
+  {#if porch.phase === "signed-out"}
+    <Login />
+  {:else if porch.phase === "resuming"}
+    <main class="waiting" aria-busy="true">Connecting...</main>
+  {:else}
+    <div class="body" class:menu-open={menuOpen}>
+      <div class="side">
+        <Sidebar onnavigate={() => (menuOpen = false)} />
+      </div>
+      <main class="main">
+        <Chat />
+      </main>
+      {#if menuOpen}
+        <button class="scrim" type="button" aria-label="Close menu" onclick={() => (menuOpen = false)}></button>
+      {/if}
+    </div>
+  {/if}
+</div>
 
 <style>
-  .splash {
-    display: grid;
-    place-content: center;
-    justify-items: center;
-    gap: 1.25rem;
+  .window {
+    display: flex;
+    flex-direction: column;
     height: 100%;
   }
 
-  .splash p {
-    margin: 0;
-    font-family: var(--serif);
-    font-size: var(--t-title);
-    color: var(--muted);
+  .bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: none;
+    min-height: 40px;
+    padding: 4px var(--pad);
+    padding-top: max(4px, env(safe-area-inset-top));
+    border-bottom: 1px solid var(--line);
   }
 
-  .shell {
+  .wordmark {
+    font-size: 21px;
+    font-weight: 300;
+    letter-spacing: 0.04em;
+    line-height: 1;
+    color: var(--strong);
+  }
+
+  .rule {
+    align-self: stretch;
+    width: 1px;
+    margin: 2px 0;
+    background: var(--line);
+  }
+
+  .status {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    color: var(--weak);
+  }
+
+  .status.warn {
+    color: var(--attention);
+  }
+
+  .status.notice {
+    color: var(--strong);
+  }
+
+  .menu {
+    display: none;
+  }
+
+  .waiting {
     display: grid;
-    grid-template-columns: var(--sidebar-w) minmax(0, 1fr) 0;
-    height: 100%;
-    overflow: hidden;
+    place-items: center;
+    flex: 1;
+    color: var(--weak);
+  }
+
+  .body {
     position: relative;
+    display: grid;
+    grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+    flex: 1;
+    min-height: 0;
   }
 
-  .shell.members-open {
-    grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--members-w);
+  .side {
+    min-height: 0;
+    border-right: 1px solid var(--line);
+    background: var(--bg);
   }
 
-  .nav-col,
-  .members-col {
+  .main {
+    display: flex;
+    flex-direction: column;
     min-width: 0;
-    overflow: hidden;
-  }
-
-  .chat-col {
-    min-width: 0;
-    position: relative;
+    min-height: 0;
   }
 
   .scrim {
     display: none;
   }
 
-  @media (max-width: 1000px) {
-    .shell.members-open {
-      grid-template-columns: 220px minmax(0, 1fr) 200px;
+  @media (max-width: 700px) {
+    .menu {
+      display: inline-flex;
     }
 
-    .shell {
-      grid-template-columns: 220px minmax(0, 1fr) 0;
+    .wordmark {
+      font-size: 19px;
     }
-  }
 
-  @media (max-width: 760px) {
-    .shell,
-    .shell.members-open {
+    .body {
       grid-template-columns: minmax(0, 1fr);
     }
 
-    .nav-col,
-    .members-col {
+    .side {
       position: absolute;
-      top: 0;
-      bottom: 0;
+      inset: 0 auto 0 0;
       z-index: 10;
-      width: min(84vw, 300px);
-      transition: transform 220ms cubic-bezier(0.3, 0, 0.2, 1);
-      box-shadow: 0 0 40px rgba(0, 0, 0, 0.45);
+      width: min(85vw, 300px);
+      transform: translateX(-101%);
+      transition: transform 160ms ease-out;
     }
 
-    .nav-col {
-      left: 0;
-      transform: translateX(-105%);
-    }
-
-    .members-col {
-      right: 0;
-      transform: translateX(105%);
-    }
-
-    .nav-drawer .nav-col,
-    .members-drawer .members-col {
+    .menu-open .side {
       transform: none;
     }
 
@@ -168,30 +183,9 @@
       display: block;
       position: absolute;
       inset: 0;
-      z-index: 5;
-      border: none;
-      background: rgba(10, 13, 20, 0.55);
-      cursor: default;
+      z-index: 9;
+      border: 0;
+      background: rgba(0, 0, 0, 0.55);
     }
-  }
-
-  .toast {
-    position: fixed;
-    left: 50%;
-    bottom: 6rem;
-    z-index: 20;
-    max-width: min(90vw, 28rem);
-    padding: 0.6rem 1rem;
-    transform: translateX(-50%);
-    border: 1px solid var(--line-strong);
-    border-radius: var(--radius-m);
-    background: var(--raise);
-    box-shadow: 0 16px 32px -12px rgba(0, 0, 0, 0.6);
-    font-size: var(--t-small);
-    animation: rise 180ms ease-out;
-  }
-
-  @keyframes rise {
-    from { opacity: 0; transform: translate(-50%, 6px); }
   }
 </style>

@@ -11,7 +11,7 @@ then run
     uv run --no-project --with playwright python scripts/voice_e2e.py [URL] [SHOT_DIR]
 
 It registers two fresh users, puts both in voice in #general, and checks that
-audio flows both ways, the speaking rings light, a dropped socket rejoins,
+audio flows both ways, the speaking lights light, a dropped socket rejoins,
 and mute and leave reach the other side. It uses the installed Edge by default
 (PORCH_E2E_CHANNEL=chrome or chromium to change that), so nothing downloads.
 Each run spends a little of the Realtime app's free allowance.
@@ -84,12 +84,12 @@ def hearing(stats) -> bool:
 
 async def sign_up(page, name):
     await page.goto(URL)
-    await page.get_by_role("button", name="Create an account").click()
-    if await page.get_by_label("Server").count():
-        await page.get_by_label("Server").fill(URL.split("//", 1)[-1].rstrip("/"))
-    await page.get_by_label("Username").fill(f"{name}{RUN}")
-    await page.get_by_label("Password").fill("correct horse battery")
-    await page.get_by_role("button", name="Create account").click()
+    await page.get_by_label("Create account").check()
+    if await page.get_by_label("Server", exact=True).count():
+        await page.get_by_label("Server", exact=True).fill(URL.split("//", 1)[-1].rstrip("/"))
+    await page.get_by_label("Username", exact=True).fill(f"{name}{RUN}")
+    await page.get_by_label("Password", exact=True).fill("correct horse battery")
+    await page.get_by_role("button", name="Create account and sign in").click()
     await page.get_by_role("button", name="Join voice").wait_for(timeout=10_000)
 
 
@@ -123,12 +123,12 @@ async def run(tone: Path) -> bool:
             print(name, json.dumps(stats))
             ok &= hearing(stats) and stats["state"] == "connected"
             other = "bob" if name == "alice" else "alice"
-            ring = page.locator(".sitter", has_text=f"{other}{RUN}").locator(".avatar.speaking")
+            ring = page.locator(".sitter", has_text=f"{other}{RUN}").locator(".light.speaking")
             try:
                 await ring.wait_for(timeout=4_000)
-                print(f"{name} sees {other}'s speaking ring")
+                print(f"{name} sees {other}'s speaking light")
             except Exception:
-                print(f"{name} never saw {other}'s speaking ring")
+                print(f"{name} never saw {other}'s speaking light")
                 ok = False
             if SHOTS:
                 await page.screenshot(path=str(SHOTS / f"voice-{name}.png"))

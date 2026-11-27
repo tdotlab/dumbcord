@@ -5,79 +5,58 @@
 // connection. Porch's server makes the Realtime calls on our behalf (it holds
 // the app token), so every negotiation step is a request over the WebSocket,
 // answered by a `voice_reply` with the same `rid`.
+//
+// A member is the server's VoiceMember: { user, room, muted, live }.
 
 import { SvelteSet } from "svelte/reactivity";
-import type { ClientMessage } from "./protocol/ClientMessage";
-import type { ServerMessage } from "./protocol/ServerMessage";
-import type { VoiceMember } from "./protocol/VoiceMember";
 
-type Reply = Extract<ServerMessage, { type: "voice_reply" }>;
-type Request =
-  | { type: "voice_join"; room: string }
-  | { type: "voice_publish"; sdp: string; mid: string }
-  | { type: "voice_pull"; users: string[] }
-  | { type: "voice_answer"; sdp: string };
-
-export type VoicePhase = "idle" | "joining" | "live";
-
-const ICE: RTCIceServer[] = [{ urls: "stun:stun.cloudflare.com:3478" }];
+const ICE = [{ urls: "stun:stun.cloudflare.com:3478" }];
 const REQUEST_TIMEOUT = 15_000;
 /** RMS level, 0..1, above which someone counts as speaking. */
 const SPEAKING_LEVEL = 0.02;
-/** Keep the ring on this long after the level drops, so it doesn't flicker. */
+/** Keep the light on this long after the level drops, so it doesn't flicker. */
 const SPEAKING_HOLD = 350;
 /** A track can't be pulled until its publisher's media reaches Cloudflare. */
 const PULL_RETRIES = [500, 1000, 2000, 4000];
 
 class VoiceError extends Error {}
 
-interface Heard {
-  audio: HTMLAudioElement;
-  track: MediaStreamTrack;
-}
-
-interface Meter {
-  source: MediaStreamAudioSourceNode;
-  analyser: AnalyserNode;
-  data: Float32Array<ArrayBuffer>;
-  lastLoud: number;
-}
-
 export class Voice {
   /** The server has a Realtime app configured. */
   enabled = $state(false);
   /** Everyone sitting in any voice room, by name. */
-  members = $state<Record<string, VoiceMember>>({});
+  members = $state({});
   /** The room this device is in (or joining), `#name`. */
-  room = $state<string | null>(null);
-  phase = $state<VoicePhase>("idle");
+  room = $state(null);
+  /** "idle", "joining" or "live". */
+  phase = $state("idle");
   muted = $state(false);
   /** People whose audio is above the speaking level right now (me included). */
-  speaking = new SvelteSet<string>();
+  speaking = new SvelteSet();
 
-  private me = "";
-  private rid = 0;
-  private waiting = new Map<number, { resolve: (r: Reply) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+  me = "";
+  rid = 0;
+  waiting = new Map();
   /** Every negotiation step runs in order on this chain. */
-  private chain: Promise<unknown> = Promise.resolve();
+  chain = Promise.resolve();
   /** Bumped on every join and leave, so stale steps can tell they are stale. */
-  private gen = 0;
-  private pc: RTCPeerConnection | null = null;
-  private mic: MediaStream | null = null;
-  private heard = new Map<string, Heard>();
-  private audioCtx: AudioContext | null = null;
-  private meters = new Map<string, Meter>();
-  private meterTimer: ReturnType<typeof setInterval> | undefined;
+  gen = 0;
+  pc = null;
+  mic = null;
+  heard = new Map();
+  audioCtx = null;
+  meters = new Map();
+  meterTimer;
   /** Rejoin this room once the socket is back (we lose the seat when it drops). */
-  private rejoin: string | null = null;
+  rejoin = null;
 
-  constructor(
-    private send: (msg: ClientMessage) => boolean,
-    private toast: (message: string) => void,
-  ) {}
+  constructor(send, toast) {
+    this.send = send;
+    this.toast = toast;
+  }
 
   /** Who is in `room`, in a stable order. */
-  inRoom(room: string): VoiceMember[] {
+  inRoom(room) {
     return Object.values(this.members)
       .filter((m) => m.room === room)
       .sort((a, b) => a.user.localeCompare(b.user));
@@ -86,7 +65,7 @@ export class Voice {
   // ---- what the user does ---------------------------------------------
 
   /** `again` forces a fresh join even if we think we're already there. */
-  async join(room: string, again = false) {
+  async join(room, again = false) {
     if (!this.enabled) return;
     if (!again && this.room === room && this.phase !== "idle") return;
     this.teardown();
@@ -133,7 +112,7 @@ export class Voice {
 
   // ---- what the server says -------------------------------------------
 
-  onWelcome(me: string, enabled: boolean, roster: VoiceMember[]) {
+  onWelcome(me, enabled, roster) {
     this.me = me;
     this.enabled = enabled;
     this.members = Object.fromEntries(roster.map((m) => [m.user, m]));
@@ -163,7 +142,7 @@ export class Voice {
     this.muted = false;
   }
 
-  onMessage(msg: ServerMessage) {
+  onMessage(msg) {
     switch (msg.type) {
       case "voice_reply": {
         const w = this.waiting.get(msg.rid);
@@ -212,10 +191,10 @@ export class Voice {
 
   // ---- negotiation ----------------------------------------------------
 
-  private request(req: Request): Promise<Reply> {
+  request(req) {
     const rid = ++this.rid;
     return new Promise((resolve, reject) => {
-      if (!this.send({ ...req, rid } as ClientMessage)) {
+      if (!this.send({ ...req, rid })) {
         reject(new VoiceError("Not connected to Porch right now."));
         return;
       }
@@ -228,13 +207,13 @@ export class Voice {
   }
 
   /** Run `fn` after every earlier step, unless the session it belongs to is gone. */
-  private step<T>(gen: number, fn: () => Promise<T>): Promise<T | undefined> {
+  step(gen, fn) {
     const run = this.chain.then(() => (gen === this.gen ? fn() : undefined));
     this.chain = run.catch(() => {});
     return run;
   }
 
-  private async openMic(): Promise<MediaStream> {
+  async openMic() {
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new VoiceError("Voice needs a secure (https) connection to the server.");
     }
@@ -250,7 +229,7 @@ export class Voice {
     }
   }
 
-  private async connect(gen: number, room: string) {
+  async connect(gen, room) {
     await this.request({ type: "voice_join", room });
     if (gen !== this.gen) return;
 
@@ -259,18 +238,18 @@ export class Voice {
     pc.onconnectionstatechange = () => {
       if (pc !== this.pc || pc.connectionState !== "failed") return;
       // ICE gave up (network change, sleep): start over in the same room.
-      this.toast("Voice dropped. Reconnecting…");
+      this.toast("Voice dropped. Reconnecting...");
       if (this.room) void this.join(this.room, true);
     };
 
-    const track = this.mic!.getAudioTracks()[0]!;
+    const track = this.mic.getAudioTracks()[0];
     const sender = pc.addTransceiver(track, { direction: "sendonly" });
     await pc.setLocalDescription(await pc.createOffer());
     const mid = sender.mid;
     if (!mid || !pc.localDescription) throw new Error("no mid after setLocalDescription");
     const reply = await this.request({ type: "voice_publish", sdp: pc.localDescription.sdp, mid });
     if (gen !== this.gen) return;
-    await pc.setRemoteDescription({ type: "answer", sdp: reply.sdp! });
+    await pc.setRemoteDescription({ type: "answer", sdp: reply.sdp });
     this.phase = "live";
     if (this.muted) this.send({ type: "voice_mute", muted: true });
 
@@ -280,7 +259,7 @@ export class Voice {
     if (others.length) await this.pull(gen, others);
   }
 
-  private async pull(gen: number, users: string[], attempt = 0) {
+  async pull(gen, users, attempt = 0) {
     const pc = this.pc;
     const wanted = users.filter((u) => !this.heard.has(u));
     if (!pc || !wanted.length) return;
@@ -305,7 +284,7 @@ export class Voice {
     if (!reply.sdp) return;
     await pc.setRemoteDescription({ type: "offer", sdp: reply.sdp });
     await pc.setLocalDescription(await pc.createAnswer());
-    await this.request({ type: "voice_answer", sdp: pc.localDescription!.sdp });
+    await this.request({ type: "voice_answer", sdp: pc.localDescription.sdp });
     if (gen !== this.gen) return;
     for (const { user, mid } of reply.tracks) {
       const t = pc.getTransceivers().find((x) => x.mid === mid);
@@ -313,14 +292,14 @@ export class Voice {
     }
   }
 
-  private pullFailed(e: unknown) {
+  pullFailed(e) {
     if (e instanceof VoiceError) this.toast(e.message);
     else console.error("voice pull failed", e);
   }
 
   // ---- audio ----------------------------------------------------------
 
-  private hear(user: string, track: MediaStreamTrack) {
+  hear(user, track) {
     this.drop(user);
     const stream = new MediaStream([track]);
     // Chromium only plays remote WebRTC audio through a media element.
@@ -332,7 +311,7 @@ export class Voice {
     this.meter(user, stream);
   }
 
-  private drop(user: string) {
+  drop(user) {
     const h = this.heard.get(user);
     if (h) {
       h.audio.pause();
@@ -342,7 +321,7 @@ export class Voice {
     this.unmeter(user);
   }
 
-  private meter(user: string, stream: MediaStream) {
+  meter(user, stream) {
     this.unmeter(user);
     this.audioCtx ??= new AudioContext();
     void this.audioCtx.resume().catch(() => {});
@@ -354,7 +333,7 @@ export class Voice {
     this.meterTimer ??= setInterval(() => this.measure(), 100);
   }
 
-  private unmeter(user: string) {
+  unmeter(user) {
     const m = this.meters.get(user);
     if (m) {
       m.source.disconnect();
@@ -363,7 +342,7 @@ export class Voice {
     this.speaking.delete(user);
   }
 
-  private measure() {
+  measure() {
     const now = performance.now();
     for (const [user, m] of this.meters) {
       m.analyser.getFloatTimeDomainData(m.data);
@@ -381,7 +360,7 @@ export class Voice {
   }
 
   /** Close everything local: connection, microphone, playback, meters. */
-  private teardown() {
+  teardown() {
     for (const user of [...this.heard.keys()]) this.drop(user);
     for (const user of [...this.meters.keys()]) this.unmeter(user);
     clearInterval(this.meterTimer);

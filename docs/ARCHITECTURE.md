@@ -14,7 +14,7 @@ signalling and media never touches the VPS.
 | `voice.rs` | Cloudflare Realtime client: new session, publish, pull, renegotiate |
 | `store.rs` | SQLite: schema migrations (`PRAGMA user_version`), users, sessions, channels, messages, read markers |
 | `auth.rs` | Argon2id password hashing with a concurrency cap; session tokens (stored as SHA-256) |
-| `protocol.rs` | Every frame in both directions, with `ts-rs` exports for the client |
+| `protocol.rs` | Every frame in both directions; the source of truth for the client too |
 | `validate.rs` | Names, targets, text limits |
 | `error.rs` | Error codes sent to clients |
 
@@ -34,16 +34,16 @@ rate-limited per action, and frames over 64 KiB are refused.
 
 | File | Job |
 | --- | --- |
-| `lib/conn.ts` | The socket: server URL resolution, ping every 25 s, treat 60 s of silence as dead, reconnect with backoff |
-| `lib/porch.svelte.ts` | All client state as one Svelte 5 runes class: sign-in, conversations, drafts, unread, typing, optimistic sends |
-| `lib/voice.svelte.ts` | Voice: microphone, the one `RTCPeerConnection`, who is in which room, mute, speaking detection |
-| `lib/markdown.ts` | marked + DOMPurify; mentions and links |
-| `lib/platform.ts` | Tauri vs browser: notifications, opening links, visibility |
+| `lib/conn.js` | The socket: server URL resolution, ping every 25 s, treat 60 s of silence as dead, reconnect with backoff |
+| `lib/porch.svelte.js` | All client state as one Svelte 5 runes class: sign-in, conversations, drafts, unread, typing, optimistic sends |
+| `lib/voice.svelte.js` | Voice: microphone, the one `RTCPeerConnection`, who is in which room, mute, speaking detection |
+| `lib/markdown.js` | marked + DOMPurify; mentions and links |
+| `lib/platform.js` | Tauri vs browser: notifications, opening links, visibility |
 | `lib/components/` | UI, reading `porch` and calling its methods |
-| `App.svelte` | Layout: sidebar, chat, members; drawers under 760 px |
+| `App.svelte` | Layout: top bar, sidebar, chat; the sidebar is a drawer under 700 px |
 
 Sends are optimistic: a message appears faded with a client nonce, and the server's echo
-replaces it. If the socket is down the message is marked failed with Retry and Discard
+replaces it. If the socket is down the message is marked "Didn't send." with Try again and Discard
 rather than queued silently.
 
 In a browser the client connects to `/ws` on its own origin (Vite proxies it in dev,

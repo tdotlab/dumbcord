@@ -2,7 +2,7 @@
 
 export const isTauri = "__TAURI_INTERNALS__" in window;
 
-export async function openExternal(url: string) {
+export async function openExternal(url) {
   if (isTauri) {
     const { openUrl } = await import("@tauri-apps/plugin-opener");
     await openUrl(url);
@@ -11,9 +11,9 @@ export async function openExternal(url: string) {
   }
 }
 
-let permission: Promise<boolean> | null = null;
+let permission = null;
 
-async function canNotify(): Promise<boolean> {
+async function canNotify() {
   if (isTauri) {
     const n = await import("@tauri-apps/plugin-notification");
     if (await n.isPermissionGranted()) return true;
@@ -30,7 +30,7 @@ export function primeNotifications() {
   permission ??= canNotify().catch(() => false);
 }
 
-export async function notify(title: string, body: string) {
+export async function notify(title, body) {
   permission ??= canNotify().catch(() => false);
   if (!(await permission)) return;
   if (isTauri) {
@@ -41,6 +41,6 @@ export async function notify(title: string, body: string) {
   }
 }
 
-export function appIsVisible(): boolean {
+export function appIsVisible() {
   return document.visibilityState === "visible" && document.hasFocus();
 }

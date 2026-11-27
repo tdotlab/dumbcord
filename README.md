@@ -12,7 +12,7 @@ server one of them runs. It is not trying to be Discord.
 | Path | What it is |
 | --- | --- |
 | `server/` | `porch-server`: Rust, tokio + axum WebSocket at `/ws`, SQLite storage |
-| `app/` | The client: Svelte 5 + TypeScript + Vite |
+| `app/` | The client: Svelte 5 + plain JavaScript + Vite |
 | `app/src-tauri/` | Tauri 2 shell that turns the client into a desktop/Android app |
 | `docs/` | Architecture and design notes |
 | `scripts/voice_e2e.py` | Two-browser voice test against real Cloudflare Realtime (see its docstring) |
@@ -79,8 +79,9 @@ Android needs the Android SDK and NDK; see `docs/ARCHITECTURE.md`.
 
 ```sh
 cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
-cd app && npm run check && npm run build
+cd app && npm run build
 ```
 
-`cargo test` also regenerates the client's protocol types in
-`app/src/lib/protocol/` from the Rust definitions. Commit them when they change.
+`server/src/protocol.rs` is the one description of the wire protocol; the client reads
+the same JSON shapes by hand. `scripts/voice_e2e.py` drives two browsers through a real
+voice call against a running server with Realtime configured.

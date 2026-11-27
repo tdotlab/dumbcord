@@ -1,31 +1,29 @@
-<script lang="ts">
+<script>
   import { onMount, untrack } from "svelte";
-  import { porch, label, type Conv } from "../porch.svelte";
-  import { dayLabel, sameDay } from "../time";
-  import Icon from "./Icon.svelte";
+  import { porch, label } from "../porch.svelte.js";
+  import { dayLabel, sameDay } from "../time.js";
   import Message from "./Message.svelte";
 
-  let { conv }: { conv: Conv } = $props();
+  let { conv } = $props();
 
   const GROUP_MS = 5 * 60_000;
   const NEAR_BOTTOM = 48;
   const NEAR_TOP = 400;
 
-  let scroller: HTMLDivElement | undefined = $state();
-  let content: HTMLDivElement | undefined = $state();
+  let scroller = $state();
+  let content = $state();
   let stuck = $state(true);
 
   // Where "new" started when this conversation was opened.
   const readMark = untrack(() => conv.lastRead);
 
   const rows = $derived.by(() => {
-    const out: { msg: (typeof conv.messages)[number]; continued: boolean; day: string | null; fresh: boolean }[] = [];
+    const out = [];
     let freshShown = false;
     conv.messages.forEach((msg, i) => {
       const prev = conv.messages[i - 1];
       const newDay = !prev || !sameDay(prev.created_at, msg.created_at);
-      const fresh =
-        !freshShown && readMark > 0 && msg.id > readMark && msg.author !== porch.me && !msg.state;
+      const fresh = !freshShown && readMark > 0 && msg.id > readMark && msg.author !== porch.me && !msg.state;
       if (fresh) freshShown = true;
       const continued =
         !!prev && !newDay && !fresh && prev.author === msg.author && msg.created_at - prev.created_at < GROUP_MS;
@@ -37,12 +35,12 @@
   const isDm = $derived(conv.key.startsWith("@"));
   const hasNew = $derived(conv.lastId > conv.lastRead);
 
-  function nearBottom(el: HTMLElement) {
+  function nearBottom(el) {
     return el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM;
   }
 
-  function toBottom(smooth = false) {
-    scroller?.scrollTo({ top: scroller.scrollHeight, behavior: smooth ? "smooth" : "instant" });
+  function toBottom() {
+    scroller?.scrollTo({ top: scroller.scrollHeight, behavior: "instant" });
   }
 
   function onScroll() {
@@ -54,7 +52,7 @@
   // Keep the reader's place when an older page lands above them.
   let snapHeight = 0;
   let snapTop = 0;
-  let renderedFirst: number | undefined;
+  let renderedFirst;
 
   $effect.pre(() => {
     void conv.messages.length;
@@ -113,41 +111,36 @@
 <div class="scroller" bind:this={scroller} onscroll={onScroll}>
   <div class="content" bind:this={content}>
     {#if conv.loaded && !conv.hasMore}
-      <header class="start">
+      <p class="start">
         {#if isDm}
-          <h2>{label(conv.key)}</h2>
-          <p>This is the start of your conversation with {label(conv.key)}.</p>
+          Start of your conversation with {label(conv.key)}.
+        {:else if conv.messages.length === 0}
+          Nothing in #{label(conv.key)} yet. Say something.
         {:else}
-          <h2>#{label(conv.key)}</h2>
-          <p>
-            {conv.messages.length === 0
-              ? "Nobody has said anything here yet. Go on."
-              : `This is the very beginning of #${label(conv.key)}.`}
-          </p>
+          Start of #{label(conv.key)}.
         {/if}
-      </header>
+      </p>
     {:else if conv.loading || conv.hasMore}
-      <p class="loading" aria-live="polite">{conv.loaded ? "Loading older messages" : "Loading messages"}</p>
+      <p class="start" aria-live="polite">{conv.loaded ? "Loading older messages..." : "Loading messages..."}</p>
     {/if}
 
     {#each rows as row (row.msg.nonce ?? row.msg.id)}
       {#if row.day}
-        <div class="divider day" role="separator"><span>{row.day}</span></div>
+        <div class="divider" role="separator"><span>{row.day}</span></div>
       {/if}
       {#if row.fresh}
         <div class="divider fresh" role="separator"><span>New</span></div>
       {/if}
       <Message message={row.msg} key={conv.key} continued={row.continued} />
     {/each}
-    <div class="tail"></div>
   </div>
 </div>
 
 {#if !stuck}
-  <button class="jump" class:new={hasNew} type="button" onclick={() => toBottom(true)}>
-    {hasNew ? "New messages" : "Jump to present"}
-    <Icon name="down" size={15} />
-  </button>
+  <div class="behind" class:new={hasNew}>
+    <span>{hasNew ? "New messages below" : "Viewing older messages"}</span>
+    <button class="btn" type="button" onclick={toBottom}>Jump to latest</button>
+  </div>
 {/if}
 
 <style>
@@ -164,89 +157,62 @@
     flex-direction: column;
     justify-content: flex-end;
     min-height: 100%;
-    padding: 1rem 0 0.25rem;
+    padding: 12px 0 8px;
   }
 
   .start {
-    padding: 2.5rem 1.25rem 0.5rem 1.6rem;
+    margin: 12px 18px 4px;
+    font-size: 13px;
+    color: var(--weak);
   }
 
-  .start h2 {
-    margin: 0 0 0.25rem;
-    font-family: var(--serif);
-    font-weight: 400;
-    font-size: 1.75rem;
-    line-height: 1.15;
-  }
-
-  .start p {
-    margin: 0;
-    color: var(--muted);
-  }
-
-  .loading {
-    margin: 1rem auto;
-    color: var(--faint);
-    font-size: var(--t-small);
-  }
-
+  /* Left-labelled rule: "Today ----------". */
   .divider {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    margin: 1.25rem 1.25rem 0.25rem;
-    font-size: 0.72rem;
-    font-weight: 700;
-    color: var(--faint);
+    gap: 10px;
+    margin: 16px 18px 2px;
+    font-size: 12px;
+    color: var(--weak);
   }
 
-  .divider::before,
   .divider::after {
     content: "";
     flex: 1;
     height: 1px;
-    background: var(--line-strong);
+    background: var(--line);
   }
 
   .divider.fresh {
-    color: var(--porchlight);
+    color: var(--attention);
   }
 
-  .divider.fresh::before,
   .divider.fresh::after {
-    background: rgba(242, 196, 109, 0.4);
+    background: var(--attention);
+    opacity: 0.6;
   }
 
-  .divider.day + .divider.fresh {
-    margin-top: 0.25rem;
+  .divider + .divider.fresh {
+    margin-top: 4px;
   }
 
-  .tail {
-    height: 0.5rem;
-  }
-
-  .jump {
-    position: absolute;
-    left: 50%;
-    bottom: 0.75rem;
-    z-index: 2;
-    display: inline-flex;
+  .behind {
+    display: flex;
     align-items: center;
-    gap: 0.4rem;
-    padding: 0.4rem 0.85rem;
-    transform: translateX(-50%);
-    border: 1px solid var(--line-strong);
-    border-radius: 999px;
-    background: var(--raise);
-    color: var(--text);
-    font-size: var(--t-small);
-    font-weight: 600;
-    box-shadow: 0 10px 24px -10px rgba(0, 0, 0, 0.6);
+    gap: 10px;
+    flex: none;
+    min-height: 36px;
+    padding: 4px var(--pad) 4px 18px;
+    border-top: 1px solid var(--line);
+    font-size: 13px;
+    color: var(--weak);
   }
 
-  .jump.new {
-    border-color: transparent;
-    background: var(--porchlight);
-    color: #2a2112;
+  .behind span {
+    flex: 1;
+  }
+
+  .behind.new {
+    color: var(--attention);
   }
 </style>

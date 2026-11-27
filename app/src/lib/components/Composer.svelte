@@ -1,11 +1,10 @@
-<script lang="ts">
+<script>
   import { onMount } from "svelte";
-  import { porch, label } from "../porch.svelte";
-  import Icon from "./Icon.svelte";
+  import { porch, label } from "../porch.svelte.js";
 
-  let { key }: { key: string } = $props();
+  let { key } = $props();
 
-  let field: HTMLTextAreaElement | undefined = $state();
+  let field = $state();
   const touch = window.matchMedia("(pointer: coarse)").matches;
 
   const text = $derived(porch.drafts[key] ?? "");
@@ -15,20 +14,20 @@
     typers.length === 0
       ? ""
       : typers.length === 1
-        ? `${typers[0]} is typing`
+        ? `${typers[0]} is typing...`
         : typers.length === 2
-          ? `${typers[0]} and ${typers[1]} are typing`
-          : "Several people are typing",
+          ? `${typers[0]} and ${typers[1]} are typing...`
+          : "Several people are typing...",
   );
 
   function fit() {
     if (!field) return;
     field.style.height = "auto";
-    field.style.height = `${Math.min(field.scrollHeight, 240)}px`;
+    field.style.height = `${Math.min(field.scrollHeight + 2, 240)}px`;
   }
 
-  function onInput(e: Event) {
-    porch.drafts[key] = (e.target as HTMLTextAreaElement).value;
+  function onInput(e) {
+    porch.drafts[key] = e.target.value;
     fit();
     if (porch.drafts[key]) porch.nudgeTyping(key);
   }
@@ -44,7 +43,7 @@
     field?.focus();
   }
 
-  function onKey(e: KeyboardEvent) {
+  function onKey(e) {
     if (e.isComposing) return;
     if (e.key === "Enter" && !e.shiftKey && !touch) {
       e.preventDefault();
@@ -59,7 +58,7 @@
   }
 
   // Start typing anywhere and it lands here.
-  function onWindowKey(e: KeyboardEvent) {
+  function onWindowKey(e) {
     if (!field || e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1) return;
     const t = document.activeElement;
     if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || porch.editing !== null) return;
@@ -75,12 +74,7 @@
 <svelte:window onkeydown={onWindowKey} />
 
 <div class="composer">
-  <div class="typing" aria-live="polite">
-    {#if typingLine}
-      <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
-      {typingLine}
-    {/if}
-  </div>
+  <div class="typing" aria-live="polite">{typingLine}</div>
   <form
     class="box"
     onsubmit={(e) => {
@@ -89,6 +83,7 @@
     }}
   >
     <textarea
+      class="field"
       bind:this={field}
       value={text}
       oninput={onInput}
@@ -99,99 +94,43 @@
       maxlength="2000"
       enterkeyhint={touch ? "enter" : "send"}
     ></textarea>
-    <button type="submit" class="send" disabled={!text.trim()} title="Send" aria-label="Send">
-      <Icon name="send" size={18} />
-    </button>
+    <button type="submit" class="btn" disabled={!text.trim()}>Send</button>
   </form>
 </div>
 
 <style>
   .composer {
-    padding: 0 1rem 1rem;
+    flex: none;
+    padding: 0 var(--pad) var(--pad) 16px;
+    padding-bottom: max(var(--pad), env(safe-area-inset-bottom));
   }
 
   .typing {
-    display: flex;
-    align-items: center;
-    gap: 0.45rem;
-    height: 1.4rem;
-    padding-left: 0.4rem;
-    font-size: 0.75rem;
-    color: var(--muted);
-  }
-
-  .dots {
-    display: inline-flex;
-    gap: 3px;
-  }
-
-  .dots i {
-    width: 4px;
-    height: 4px;
-    border-radius: 50%;
-    background: var(--muted);
-    animation: bob 1.2s infinite ease-in-out;
-  }
-
-  .dots i:nth-child(2) {
-    animation-delay: 0.15s;
-  }
-
-  .dots i:nth-child(3) {
-    animation-delay: 0.3s;
-  }
-
-  @keyframes bob {
-    0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
-    30% { transform: translateY(-3px); opacity: 1; }
+    height: 20px;
+    padding-left: 2px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 12px;
+    color: var(--weak);
   }
 
   .box {
     display: flex;
     align-items: flex-end;
-    gap: 0.4rem;
-    padding: 0.35rem 0.35rem 0.35rem 0.9rem;
-    border: 1px solid var(--line-strong);
-    border-radius: var(--radius-m);
-    background: var(--raise);
-    transition: border-color 120ms;
-  }
-
-  .box:focus-within {
-    border-color: rgba(159, 216, 203, 0.45);
+    gap: 6px;
   }
 
   textarea {
     flex: 1;
-    min-height: 2.2rem;
-    padding: 0.45rem 0;
+    min-height: 34px;
+    padding: 6px 10px;
     resize: none;
-    border: none;
-    background: none;
-    outline: none;
     line-height: 1.45;
   }
 
-  textarea::placeholder {
-    color: var(--faint);
-  }
-
-  .send {
-    display: grid;
-    place-items: center;
-    flex: none;
-    width: 2.2rem;
-    height: 2.2rem;
-    border: none;
-    border-radius: var(--radius-s);
-    background: var(--haint);
-    color: #14201d;
-    transition: opacity 120ms, background 120ms;
-  }
-
-  .send:disabled {
-    background: transparent;
-    color: var(--faint);
-    cursor: default;
+  .btn {
+    min-height: 34px;
+    padding: 0 14px;
   }
 </style>

@@ -1,183 +1,129 @@
-<script lang="ts">
-  import { porch, label } from "../porch.svelte";
-  import Avatar from "./Avatar.svelte";
-  import Icon from "./Icon.svelte";
-  import PorchLight, { glowOf } from "./PorchLight.svelte";
+<script>
+  import { porch, label } from "../porch.svelte.js";
 
-  let { onnavigate }: { onnavigate?: () => void } = $props();
-
-  let adding = $state(false);
-  let newChannel = $state("");
+  let { onnavigate } = $props();
 
   const voice = porch.voice;
+  let newChannel = $state("");
 
-  const company = $derived([...porch.online].filter((u) => u !== porch.me).length);
-  const porchLine = $derived(
-    company === 0
-      ? "Just you out here"
-      : `${company + 1} on the porch`,
+  // Everyone but me, online first, then by name.
+  const people = $derived(
+    porch.users
+      .filter((u) => u !== porch.me)
+      .sort((a, b) => Number(porch.online.has(b)) - Number(porch.online.has(a)) || a.localeCompare(b)),
   );
 
-  function go(key: string) {
+  function go(key) {
     porch.open(key);
     onnavigate?.();
   }
 
-  function addChannel(e: SubmitEvent) {
+  function addChannel(e) {
     e.preventDefault();
     const name = newChannel.trim().replace(/^#/, "").toLowerCase().replace(/\s+/g, "-");
-    if (name) {
-      porch.createChannel(name);
-      porch.channels.includes(name) || setTimeout(() => porch.open(`#${name}`), 300);
-    }
     newChannel = "";
-    adding = false;
-  }
-
-  function focus(node: HTMLInputElement) {
-    node.focus();
+    if (!name) return;
+    if (porch.channels.includes(name)) return go(`#${name}`);
+    porch.createChannel(name);
+    setTimeout(() => porch.channels.includes(name) && go(`#${name}`), 300);
   }
 </script>
 
 <nav class="sidebar" aria-label="Conversations">
-  <header class="porch" style:--glow={glowOf(company)}>
-    <PorchLight height={62} {company} />
-    <div>
-      <div class="wordmark">Porch</div>
-      <div class="who" class:lit={company > 0}>{porchLine}</div>
-    </div>
-  </header>
-
   <div class="lists">
-    <section>
-      <div class="heading">
-        <h2>Channels</h2>
-        <button class="icon" title="New channel" aria-label="New channel" onclick={() => (adding = !adding)}>
-          <Icon name="plus" size={16} />
-        </button>
-      </div>
-
-      {#if adding}
-        <form class="new" onsubmit={addChannel}>
-          <input
-            use:focus
-            bind:value={newChannel}
-            placeholder="new-channel"
-            maxlength="32"
-            aria-label="New channel name"
-            onkeydown={(e) => e.key === "Escape" && (adding = false)}
-            onblur={() => !newChannel && (adding = false)}
-          />
-        </form>
-      {/if}
-
+    <section aria-labelledby="channels-head">
+      <h2 class="head" id="channels-head">Channels</h2>
       <ul>
         {#each porch.channels as name (name)}
           {@const key = `#${name}`}
           {@const conv = porch.convs[key]}
-          {@const sitting = voice.inRoom(key)}
           <li>
             <button
+              type="button"
               class="row"
               class:current={porch.current === key}
-              class:unread={conv && conv.lastId > conv.lastRead}
+              class:unread={porch.unread(key)}
               aria-current={porch.current === key ? "page" : undefined}
               onclick={() => go(key)}
             >
-              <span class="glyph"><Icon name="hash" size={16} /></span>
-              <span class="name">{name}</span>
-              {#if conv?.attention}
-                <span class="badge">{conv.attention}</span>
-              {:else if conv && conv.lastId > conv.lastRead}
-                <span class="dot" aria-label="unread"></span>
-              {/if}
+              <span class="name">#{name}</span>
+              {#if conv?.attention}<span class="count" aria-label="{conv.attention} for you">{conv.attention}</span>{/if}
             </button>
-            {#if sitting.length}
-              <button
-                class="voice-room"
-                class:mine={voice.room === key}
-                title={voice.room === key ? undefined : `Join voice in #${name}`}
-                disabled={voice.room === key}
-                onclick={() => voice.join(key)}
-              >
-                {#each sitting as m (m.user)}
-                  <span class="sitter" class:quiet={!m.live}>
-                    <Avatar name={m.user} size={20} speaking={voice.speaking.has(m.user)} />
-                    <span class="name">{m.user}</span>
-                    {#if m.muted}<span class="muted" title="Muted"><Icon name="mic-off" size={14} /></span>{/if}
-                  </span>
+            {#if voice.inRoom(key).length}
+              <ul class="sitters" aria-label="In voice in #{name}">
+                {#each voice.inRoom(key) as m (m.user)}
+                  <li class="sitter">
+                    <span
+                      class="light"
+                      class:speaking={voice.speaking.has(m.user)}
+                      class:live={m.live}
+                      aria-hidden="true"
+                    ></span>
+                    <span class="who">{m.user}</span>
+                    {#if m.muted}<span class="muted">muted</span>{/if}
+                  </li>
                 {/each}
-              </button>
+              </ul>
             {/if}
           </li>
         {/each}
       </ul>
+      <form class="new" onsubmit={addChannel}>
+        <input class="field" bind:value={newChannel} placeholder="new-channel" maxlength="32" aria-label="New channel name" />
+        <button class="btn" type="submit" title="Create channel" aria-label="Create channel" disabled={!newChannel.trim()}>+</button>
+      </form>
     </section>
 
-    <section>
-      <div class="heading"><h2>Direct messages</h2></div>
-      {#if porch.dms.length === 0}
-        <p class="empty">Pick someone from the porch list to start one.</p>
+    <hr class="sep" />
+
+    <section aria-labelledby="people-head">
+      <h2 class="head" id="people-head">People</h2>
+      {#if people.length === 0}
+        <p class="empty">Nobody else yet. Give a friend the invite code.</p>
+      {:else}
+        <ul>
+          {#each people as user (user)}
+            {@const key = `@${user}`}
+            {@const conv = porch.convs[key]}
+            {@const on = porch.online.has(user)}
+            <li>
+              <button
+                type="button"
+                class="row"
+                class:current={porch.current === key}
+                class:unread={porch.unread(key)}
+                class:away={!on}
+                aria-current={porch.current === key ? "page" : undefined}
+                onclick={() => go(key)}
+              >
+                <span class="dot" class:on aria-hidden="true"></span>
+                <span class="name">{user}</span>
+                <span class="visually-hidden">{on ? "online" : "offline"}</span>
+                {#if conv?.attention}<span class="count" aria-label="{conv.attention} unread">{conv.attention}</span>{/if}
+              </button>
+            </li>
+          {/each}
+        </ul>
       {/if}
-      <ul>
-        {#each porch.dms as key (key)}
-          {@const conv = porch.convs[key]}
-          {@const user = label(key)}
-          <li>
-            <button
-              class="row person"
-              class:current={porch.current === key}
-              class:unread={conv && conv.lastId > conv.lastRead}
-              aria-current={porch.current === key ? "page" : undefined}
-              onclick={() => go(key)}
-            >
-              <Avatar name={user} size={24} lit={porch.online.has(user)} />
-              <span class="name">{user}</span>
-              {#if conv?.attention}
-                <span class="badge">{conv.attention}</span>
-              {/if}
-            </button>
-          </li>
-        {/each}
-      </ul>
     </section>
   </div>
 
   {#if voice.phase !== "idle" && voice.room}
-    <div class="voice-bar" role="status">
-      <span class="voice-dot" class:live={voice.phase === "live"} aria-hidden="true"></span>
-      <div class="voice-text">
-        <div class="voice-state">{voice.phase === "live" ? "Voice connected" : "Joining voice…"}</div>
-        <button class="voice-where" onclick={() => go(voice.room!)}>#{label(voice.room)}</button>
+    <section class="voice" aria-label="Voice">
+      <div class="voice-line">
+        <span class="state" class:live={voice.phase === "live"}>
+          {voice.phase === "live" ? "Voice connected" : "Joining voice..."}
+        </span>
+        <button type="button" class="where" onclick={() => go(voice.room)}>#{label(voice.room)}</button>
       </div>
-      <button
-        class="icon"
-        class:off={voice.muted}
-        title={voice.muted ? "Unmute" : "Mute"}
-        aria-label={voice.muted ? "Unmute" : "Mute"}
-        aria-pressed={voice.muted}
-        onclick={() => voice.toggleMute()}
-      >
-        <Icon name={voice.muted ? "mic-off" : "mic"} size={18} />
-      </button>
-      <button class="icon leave" title="Leave voice" aria-label="Leave voice" onclick={() => voice.leave()}>
-        <Icon name="hangup" size={18} />
-      </button>
-    </div>
+      <div class="voice-buttons">
+        <button type="button" class="btn" class:on={voice.muted} aria-pressed={voice.muted} onclick={() => voice.toggleMute()}>
+          {voice.muted ? "Unmute" : "Mute"}
+        </button>
+        <button type="button" class="btn" onclick={() => voice.leave()}>Leave</button>
+      </div>
+    </section>
   {/if}
-
-  <footer class="me">
-    <Avatar name={porch.me} size={32} lit={porch.status === "open"} />
-    <div class="me-text">
-      <div class="me-name">{porch.me}</div>
-      <div class="status" class:down={porch.status !== "open"}>
-        {porch.status === "open" ? "Connected" : "Reconnecting"}
-      </div>
-    </div>
-    <button class="icon" title="Sign out" aria-label="Sign out" onclick={() => porch.signOut()}>
-      <Icon name="out" size={18} />
-    </button>
-  </footer>
 </nav>
 
 <style>
@@ -185,72 +131,17 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    background: var(--boards);
-    border-right: 1px solid var(--line);
-  }
-
-  .porch {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 0.8rem;
-    padding: 0.9rem 1rem 0.9rem 1rem;
-    border-bottom: 1px solid var(--line);
-  }
-
-  /* The lantern's light falls across the boards; more company, more light. */
-  .porch::before {
-    content: "";
-    position: absolute;
-    inset: 0 0 -3rem 0;
-    background: radial-gradient(70% 90% at 2.1rem 45%, rgba(242, 196, 109, 0.16), transparent 70%);
-    opacity: var(--glow);
-    transition: opacity 900ms ease;
-    pointer-events: none;
-  }
-
-  .porch > :global(*) {
-    position: relative;
-  }
-
-  .wordmark {
-    font-family: var(--serif);
-    font-size: var(--t-title);
-    line-height: 1.1;
-  }
-
-  .who {
-    font-size: var(--t-small);
-    color: var(--faint);
-    transition: color 600ms;
-  }
-
-  .who.lit {
-    color: var(--porchlight);
   }
 
   .lists {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
-    padding: 0.75rem 0.5rem;
+    padding: 12px 8px 12px;
   }
 
-  section + section {
-    margin-top: 1.25rem;
-  }
-
-  .heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 0.25rem 0.35rem 0.6rem;
-  }
-
-  h2 {
-    margin: 0;
-    font-size: var(--t-small);
-    font-weight: 600;
-    color: var(--muted);
+  section > .head {
+    padding: 0 4px 4px;
   }
 
   ul {
@@ -262,235 +153,180 @@
   .row {
     display: flex;
     align-items: center;
-    gap: 0.55rem;
-    width: 100%;
-    min-height: 2.1rem;
-    padding: 0.3rem 0.6rem;
-    border: none;
-    border-radius: var(--radius-s);
+    gap: 8px;
+    max-width: 100%;
+    min-height: 24px;
+    margin: 1px 0;
+    padding: 1px 5px;
+    border: 0;
+    border-radius: var(--radius);
     background: none;
-    color: var(--muted);
+    color: var(--text);
     text-align: left;
-    transition: background 100ms, color 100ms;
   }
 
   .row:hover {
-    background: var(--raise);
-    color: var(--text);
+    background: var(--hover);
+    color: var(--strong);
   }
 
   .row.unread {
-    color: var(--text);
-    font-weight: 700;
+    color: var(--strong);
+    font-weight: 500;
+  }
+
+  .row.away {
+    color: var(--weak);
   }
 
   .row.current {
-    background: var(--haint-wash);
-    color: var(--haint);
-  }
-
-  .glyph {
-    display: grid;
-    color: var(--faint);
-  }
-
-  .current .glyph {
-    color: var(--haint);
+    background: var(--select);
+    color: var(--select-text);
   }
 
   .name {
-    flex: 1;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--text);
-  }
-
-  .badge {
-    min-width: 1.25rem;
-    padding: 0 0.35rem;
-    border-radius: 999px;
-    background: var(--porchlight);
-    color: #2a2112;
-    font-size: 0.72rem;
-    font-weight: 700;
-    line-height: 1.25rem;
+  .count {
+    min-width: 20px;
+    padding: 0 5px;
+    border-radius: var(--radius);
+    background: var(--attention);
+    color: #1b1b1b;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 18px;
     text-align: center;
   }
 
-  .empty {
-    margin: 0;
-    padding: 0.2rem 0.6rem;
-    color: var(--faint);
-    font-size: var(--t-small);
+  .dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border: 1px solid var(--weak);
+    border-radius: 50%;
   }
 
-  .new {
-    padding: 0 0.25rem 0.4rem;
+  .dot.on {
+    border-color: var(--live);
+    background: var(--live);
   }
 
-  .new input {
-    width: 100%;
-    padding: 0.4rem 0.6rem;
-    background: var(--sunk);
-    border: 1px solid var(--haint);
-    border-radius: var(--radius-s);
-    outline: none;
-  }
-
-  .icon {
-    display: grid;
-    place-items: center;
-    width: 1.9rem;
-    height: 1.9rem;
-    border: none;
-    border-radius: var(--radius-s);
-    background: none;
-    color: var(--muted);
-  }
-
-  .icon:hover {
-    background: var(--raise);
-    color: var(--text);
-  }
-
-  .voice-room {
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-    width: 100%;
-    margin: 0.1rem 0 0.3rem;
-    padding: 0.25rem 0.6rem 0.25rem 2.1rem;
-    border: none;
-    border-radius: var(--radius-s);
-    background: none;
-    color: var(--muted);
-    text-align: left;
-  }
-
-  .voice-room:not(:disabled):hover {
-    background: var(--raise);
-    color: var(--text);
-  }
-
-  .voice-room:disabled {
-    cursor: default;
-  }
-
-  .voice-room.mine {
-    color: var(--text);
+  .sitters {
+    margin: 0 0 4px;
+    padding-left: 18px;
   }
 
   .sitter {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    min-height: 1.6rem;
-    font-size: var(--t-small);
+    gap: 8px;
+    min-height: 20px;
+    font-size: 13px;
   }
 
-  .sitter.quiet {
-    opacity: 0.55;
-  }
-
-  .muted {
-    display: grid;
-    color: var(--faint);
-  }
-
-  .voice-bar {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.6rem 0.5rem 0.6rem 1rem;
-    border-top: 1px solid var(--line);
-    background: color-mix(in srgb, var(--haint) 6%, var(--sunk));
-  }
-
-  .voice-dot {
+  /* A small square that turns green while that person talks. */
+  .light {
     flex: none;
     width: 8px;
     height: 8px;
-    margin-right: 0.3rem;
-    border-radius: 50%;
-    background: var(--faint);
+    border: 1px solid var(--weak);
   }
 
-  .voice-dot.live {
-    background: var(--haint);
-    box-shadow: 0 0 8px var(--haint-deep);
+  .light.live {
+    border-color: var(--live);
   }
 
-  .voice-text {
-    flex: 1;
+  .light.speaking {
+    background: var(--live);
+  }
+
+  .who {
     min-width: 0;
-  }
-
-  .voice-state {
-    font-size: var(--t-small);
-    font-weight: 700;
-    color: var(--haint);
-  }
-
-  .voice-where {
-    display: block;
-    max-width: 100%;
-    padding: 0;
-    border: none;
-    background: none;
-    color: var(--faint);
-    font-size: var(--t-small);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .voice-where:hover {
-    color: var(--text);
+  .muted {
+    color: var(--weak);
+    font-size: 12px;
+  }
+
+  .new {
+    display: flex;
+    gap: 6px;
+    margin: 8px 0 0;
+    padding: 0 2px;
+  }
+
+  .new .btn {
+    flex: none;
+    width: 28px;
+    padding: 0;
+    font-size: 16px;
+  }
+
+  .sep {
+    margin: 12px 4px;
+  }
+
+  .empty {
+    margin: 0;
+    padding: 0 6px;
+    font-size: 13px;
+    color: var(--weak);
+  }
+
+  .voice {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px var(--pad);
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line);
+  }
+
+  .voice-line {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 13px;
+  }
+
+  .state {
+    color: var(--attention);
+  }
+
+  .state.live {
+    color: var(--live);
+  }
+
+  .where {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--strong);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .where:hover {
     text-decoration: underline;
   }
 
-  .icon.off {
-    color: var(--error);
-  }
-
-  .icon.leave:hover {
-    background: var(--error-wash);
-    color: var(--error);
-  }
-
-  .me {
+  .voice-buttons {
     display: flex;
-    align-items: center;
-    gap: 0.65rem;
-    padding: 0.7rem 0.75rem 0.7rem 1rem;
-    background: var(--sunk);
+    gap: 6px;
   }
 
-  .me-text {
+  .voice-buttons .btn {
     flex: 1;
-    min-width: 0;
-  }
-
-  .me-name {
-    font-weight: 700;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .status {
-    font-size: var(--t-small);
-    color: var(--faint);
-  }
-
-  .status.down {
-    color: var(--porchlight);
   }
 </style>

@@ -1,46 +1,58 @@
-# Design: porch at dusk
+# Design: a plain tool
 
-Porch should feel like the porch of a house after sundown: dark boards, a painted blue
-ceiling, one lamp on. Calm, warm, a little homemade. Not a gamer app, not a SaaS dashboard.
+Porch looks like what it grew out of: the egui DumbCord window. One flat charcoal
+surface, 1px separators, black wells for typing, grey square buttons, Ubuntu type with
+big light headings. It should look like a utility a friend wrote, not a product, and
+it should not look like Discord or like every other generated chat app.
+
+What that rules out: avatars, rounded cards, pill buttons, shadows, gradients, glows,
+blurple, icon fonts, mascot illustrations. Text labels on buttons instead of icons.
 
 ## Colour
 
+All tokens live in `app/src/app.css`.
+
 | Token | Hex | Use |
 | --- | --- | --- |
-| `--night` | `#1e2433` | Page background |
-| `--boards` | `#232a3c` | Sidebar, panels |
-| `--raise` | `#2c3449` | Hover, inputs, toasts |
-| `--sunk` | `#181d2a` | Wells, code |
-| `--haint` | `#9fd8cb` | Haint blue: selection, focus, the send button |
-| `--porchlight` | `#f2c46d` | Amber: presence, unread, mentions, who is talking. Nothing else. |
+| `--bg` | `#1b1b1b` | Everything |
+| `--well` | `#0a0a0a` | Inputs, the composer, code |
+| `--line` | `#3c3c3c` | Separators, field borders |
+| `--button` | `#3c3c3c` | Buttons (hover `#464646` with a `#969696` outline, pressed `#373737`) |
+| `--text` / `--strong` / `--weak` | `#a8a8a8` / `#e6e6e6` / `#858585` | Body, names and headings, metadata. `--weak` still meets 4.5:1. |
+| `--select` | `#005c80` | The current conversation, pressed toggles (Leave voice, Unmute), focus |
+| `--attention` | `#ff8f00` | Something wants you: a mention, the unread divider, a reconnect warning |
+| `--live` | `#6cc070` | Voice only: connected, online, someone speaking |
+| `--link` | `#5aaaff` | Links and other people's @mentions |
+| `--error` | `#ef6a5e` | Failed sends, sign-in errors |
 
-Amber is rationed. If something is amber, it is about a person: they are here, they
-said something you haven't read, they said your name, or they are talking right now
-(the glowing ring on a voice avatar, and the head count on a channel's voice button).
-Don't spend it on buttons or decoration. Your own voice connection is a state, not a
-person, so the voice bar at the foot of the sidebar is haint blue; Mute turns red only
-while you are muted.
-
-## The lantern
-
-The one bold element. It hangs in the top of the sidebar and its glow tracks how many
-people are online (`glowOf` in `PorchLight.svelte`): barely lit when you're alone,
-bright with a crowd. The sign-in card and the loading splash use it too. Nothing else
-gets an illustration.
+One colour, one meaning. Orange is never decoration and green never means anything but
+live audio or presence.
 
 ## Type
 
-Atkinson Hyperlegible Next for everything you read; Young Serif only for the wordmark
-and conversation titles. Sentence case throughout, no all-caps labels.
+Ubuntu at 300, 400 and 500. Headings are big, light and upper case ("CHANNELS",
+"PEOPLE") the way egui draws them; that is the one typographic flourish, so nothing
+else goes upper case. Names are 500, times are small and weak. Body 14px.
+
+## Layout
+
+A top bar (wordmark, a rule, the status line, Sign out), a 232px sidebar and the chat.
+Messages are a name and time on one line with the text below; follow-ups from the same
+person in a short span drop the header. A mention of you gets a 2px orange bar on the
+left. Edit and Delete appear as small buttons on hover. Under 700px the sidebar becomes
+a drawer behind a Menu button.
+
+## Voice
+
+People in a voice room are listed under its channel with a small square: outlined while
+connected, filled green while talking, with "muted" after the name. The panel at the
+foot of the sidebar says "Voice connected #room" with Mute and Leave.
 
 ## Copy
 
-Plain and a little warm, matching the porch idea where it fits naturally: "On the
-porch" for online, "Inside" for offline, "Just you out here" when alone. Voice is
-"Join voice" and "Leave voice", "Voice connected" once you're in. Errors say what
-happened and what to do. Don't force the metaphor into every string.
+Plain and literal. "Join voice", "Leave voice", "Didn't send." with "Try again",
+"Connected to host as name". Errors say what happened and what to do.
 
 ## Motion
 
-Only in answer to something: drawers sliding, the toast rising, typing dots, the lantern
-lighting at sign-in. Respect `prefers-reduced-motion`.
+Only the drawer slides. Respect `prefers-reduced-motion`.

@@ -1,5 +1,2 @@
-import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
-
-export default {
-  preprocess: vitePreprocess(),
-};
+// Plain JavaScript and plain CSS: nothing to preprocess.
+export default {};

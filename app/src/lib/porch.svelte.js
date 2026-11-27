@@ -1,94 +1,73 @@
 // Client state: one instance, shared by every component.
+//
+// A conversation ("conv") is keyed "#channel" or "@user" and looks like
+//   { key, messages, loaded, loading, older, hasMore, lastId, lastRead, attention }
+// where `older` means the request in flight is for an older page and
+// `attention` counts DMs and @mentions that arrived since the last read.
+// Messages are the server's ChatMessage ({ id, to, author, text, created_at,
+// edited_at }) plus, while unconfirmed, `nonce` and `state` ("pending" or
+// "failed"). The wire format lives in server/src/protocol.rs.
 
 import { SvelteSet } from "svelte/reactivity";
-import { Connection, serverUrl, type ConnStatus } from "./conn";
-import { mentions, setKnownUsers } from "./markdown";
-import { appIsVisible, notify } from "./platform";
-import type { ChatMessage } from "./protocol/ChatMessage";
-import type { ClientMessage } from "./protocol/ClientMessage";
-import type { ServerMessage } from "./protocol/ServerMessage";
-import { Voice } from "./voice.svelte";
-
-export interface Msg extends ChatMessage {
-  nonce?: string;
-  state?: "pending" | "failed";
-}
-
-export interface Conv {
-  key: string;
-  messages: Msg[];
-  loaded: boolean;
-  loading: boolean;
-  /** The request in flight is for an older page. */
-  older: boolean;
-  hasMore: boolean;
-  lastId: number;
-  lastRead: number;
-  /** DMs and @mentions that arrived since the last read. */
-  attention: number;
-}
-
-type Phase = "signed-out" | "resuming" | "ready";
+import { Connection, serverUrl } from "./conn.js";
+import { mentions, setKnownUsers, setMe } from "./markdown.js";
+import { appIsVisible, notify } from "./platform.js";
+import { Voice } from "./voice.svelte.js";
 
 const KEY = {
   server: "porch.server",
   token: "porch.token",
   current: "porch.current",
-} as const;
+};
 
 const TYPING_TTL = 6000;
 const PENDING_TIMEOUT = 15_000;
+const NOTICE_FOR = 6000;
 
 /** The conversation a message belongs to, from `me`'s side. */
-export function convOf(m: { to: string; author: string }, me: string): string {
+export function convOf(m, me) {
   if (m.to.startsWith("#") || m.author === me) return m.to;
   return `@${m.author}`;
 }
 
-export function label(key: string): string {
+/** "#general" -> "general", "@amy" -> "amy". */
+export function label(key) {
   return key.slice(1);
 }
 
 class Porch {
-  phase = $state<Phase>("signed-out");
-  status = $state<ConnStatus>("closed");
+  /** "signed-out", "resuming" (have a token, waiting for welcome) or "ready". */
+  phase = $state("signed-out");
+  /** The socket: "connecting", "open" or "closed". */
+  status = $state("closed");
   busy = $state(false);
   authError = $state("");
+  /** A passing message for the status line; cleared after a few seconds. */
   notice = $state("");
 
   server = $state(localStorage.getItem(KEY.server) ?? "");
   me = $state("");
-  channels = $state<string[]>([]);
-  users = $state<string[]>([]);
-  online = new SvelteSet<string>();
-  convs = $state<Record<string, Conv>>({});
+  channels = $state([]);
+  users = $state([]);
+  online = new SvelteSet();
+  convs = $state({});
   current = $state(localStorage.getItem(KEY.current) ?? "#general");
-  typing = $state<Record<string, Record<string, number>>>({});
-  drafts = $state<Record<string, string>>({});
-  editing = $state<number | null>(null);
+  /** typing[key][user] = time the indicator expires. */
+  typing = $state({});
+  drafts = $state({});
+  /** Id of the message being edited, or null. */
+  editing = $state(null);
   voice = new Voice(
     (msg) => this.send(msg),
     (message) => this.toast(message),
   );
 
-  /** DM conversations with any history, most recent first. */
-  dms = $derived(
-    Object.values(this.convs)
-      .filter((c) => c.key.startsWith("@") && (c.lastId > 0 || c.key === this.current))
-      .sort((a, b) => b.lastId - a.lastId)
-      .map((c) => c.key),
-  );
-
-  unreadCount = $derived(
-    Object.values(this.convs).filter((c) => c.lastId > c.lastRead).length,
-  );
-
-  private conn: Connection | null = null;
-  private token = localStorage.getItem(KEY.token);
-  private pendingAuth: ClientMessage | null = null;
-  private seq = 0;
-  private lastTypingSent = 0;
-  private noticeTimer: ReturnType<typeof setTimeout> | undefined;
+  conn = null;
+  token = localStorage.getItem(KEY.token);
+  pendingAuth = null;
+  seq = 0;
+  lastTypingSent = 0;
+  noticeTimer;
 
   constructor() {
     setInterval(() => this.pruneTyping(), 1000);
@@ -100,7 +79,8 @@ class Porch {
 
   // ---- signing in and out ---------------------------------------------
 
-  signIn(mode: "login" | "register", server: string, username: string, password: string, invite: string) {
+  /** `mode` is "login" or "register". */
+  signIn(mode, server, username, password, invite) {
     this.authError = "";
     this.server = server.trim();
     localStorage.setItem(KEY.server, this.server);
@@ -118,7 +98,7 @@ class Porch {
     this.endSession("");
   }
 
-  private endSession(why: string) {
+  endSession(why) {
     const conn = this.conn;
     this.conn = null;
     // Give the logout frame a moment to leave before the socket closes.
@@ -140,9 +120,9 @@ class Porch {
     this.phase = "signed-out";
   }
 
-  private startConnection() {
+  startConnection() {
     this.conn?.stop();
-    let url: string;
+    let url;
     try {
       url = serverUrl(this.server);
     } catch {
@@ -158,31 +138,30 @@ class Porch {
     this.conn.start();
   }
 
-  private onOpen() {
+  onOpen() {
     if (this.token) this.conn?.send({ type: "resume", token: this.token });
     else if (this.pendingAuth) this.conn?.send(this.pendingAuth);
   }
 
-  private onStatus(s: ConnStatus) {
+  onStatus(s) {
     this.status = s;
-    if (s === "closed") {
-      this.voice.onDisconnect();
-      for (const conv of Object.values(this.convs)) {
-        for (const m of conv.messages) if (m.state === "pending") m.state = "failed";
-      }
-      if (this.busy && !this.token) {
-        // Signing in and the server went away or was never there.
-        this.busy = false;
-        this.authError ||= "Couldn't reach that server. Check the address and try again.";
-        this.conn?.stop();
-        this.conn = null;
-      }
+    if (s !== "closed") return;
+    this.voice.onDisconnect();
+    for (const conv of Object.values(this.convs)) {
+      for (const m of conv.messages) if (m.state === "pending") m.state = "failed";
+    }
+    if (this.busy && !this.token) {
+      // Signing in and the server went away or was never there.
+      this.busy = false;
+      this.authError ||= "Couldn't reach that server. Check the address and try again.";
+      this.conn?.stop();
+      this.conn = null;
     }
   }
 
   // ---- incoming -------------------------------------------------------
 
-  private onMessage(msg: ServerMessage) {
+  onMessage(msg) {
     switch (msg.type) {
       case "welcome":
         return this.onWelcome(msg);
@@ -190,7 +169,7 @@ class Porch {
         return this.onError(msg.code, msg.message);
       case "history": {
         const conv = this.conv(msg.to);
-        const page = msg.messages as Msg[];
+        const page = msg.messages;
         if (conv.older) {
           const known = new Set(conv.messages.map((m) => m.id));
           conv.messages = [...page.filter((m) => !known.has(m.id)), ...conv.messages];
@@ -258,11 +237,12 @@ class Porch {
     }
   }
 
-  private onWelcome(msg: Extract<ServerMessage, { type: "welcome" }>) {
+  onWelcome(msg) {
     this.token = msg.token;
     localStorage.setItem(KEY.token, msg.token);
     this.pendingAuth = null;
     this.me = msg.user;
+    setMe(msg.user);
     this.channels = msg.channels;
     this.users = msg.users;
     setKnownUsers(msg.users);
@@ -289,7 +269,7 @@ class Porch {
     this.load(this.current);
   }
 
-  private onError(code: string, message: string) {
+  onError(code, message) {
     if (code === "token_invalid") {
       this.endSession("Your session ended. Sign in again.");
       return;
@@ -318,7 +298,7 @@ class Porch {
     this.toast(message);
   }
 
-  private onChat(message: ChatMessage, nonce: string | null) {
+  onChat(message, nonce) {
     const key = convOf(message, this.me);
     const conv = this.conv(key);
     if (conv.loaded || conv.loading) {
@@ -351,31 +331,27 @@ class Porch {
 
   // ---- conversations --------------------------------------------------
 
-  conv(key: string): Conv {
-    let conv = this.convs[key];
-    if (!conv) {
-      this.convs[key] = {
-        key,
-        messages: [],
-        loaded: false,
-        loading: false,
-        older: false,
-        hasMore: false,
-        lastId: 0,
-        lastRead: 0,
-        attention: 0,
-      };
-      conv = this.convs[key]!;
-    }
-    return conv;
+  conv(key) {
+    this.convs[key] ??= {
+      key,
+      messages: [],
+      loaded: false,
+      loading: false,
+      older: false,
+      hasMore: false,
+      lastId: 0,
+      lastRead: 0,
+      attention: 0,
+    };
+    return this.convs[key];
   }
 
-  exists(key: string): boolean {
+  exists(key) {
     if (key.startsWith("#")) return this.channels.includes(key.slice(1));
     return key !== `@${this.me}` && this.users.includes(key.slice(1));
   }
 
-  open(key: string) {
+  open(key) {
     if (!this.exists(key)) return;
     this.current = key;
     this.editing = null;
@@ -383,13 +359,13 @@ class Porch {
     this.load(key);
   }
 
-  load(key: string) {
+  load(key) {
     const conv = this.conv(key);
     if (conv.loaded || conv.loading) return;
     if (this.send({ type: "history", to: key, before: null })) conv.loading = true;
   }
 
-  loadOlder(key: string) {
+  loadOlder(key) {
     const conv = this.conv(key);
     if (!conv.loaded || conv.loading || !conv.hasMore) return;
     const oldest = conv.messages.find((m) => !m.state);
@@ -401,10 +377,11 @@ class Porch {
   }
 
   /** The user is looking at the bottom of `key`: everything there is read. */
-  markSeen(key: string) {
+  markSeen(key) {
     const conv = this.convs[key];
-    if (!conv || conv.lastId <= conv.lastRead) {
-      if (conv) conv.attention = 0;
+    if (!conv) return;
+    if (conv.lastId <= conv.lastRead) {
+      conv.attention = 0;
       return;
     }
     conv.lastRead = conv.lastId;
@@ -412,12 +389,17 @@ class Porch {
     this.send({ type: "mark_read", to: key, id: conv.lastId });
   }
 
-  say(key: string, text: string) {
+  unread(key) {
+    const conv = this.convs[key];
+    return !!conv && conv.lastId > conv.lastRead;
+  }
+
+  say(key, text) {
     const trimmed = text.trim();
     if (!trimmed) return;
     const conv = this.conv(key);
     const nonce = `${Date.now().toString(36)}.${++this.seq}`;
-    const draft: Msg = {
+    conv.messages.push({
       id: -this.seq,
       to: key,
       author: this.me,
@@ -426,50 +408,47 @@ class Porch {
       edited_at: null,
       nonce,
       state: "pending",
-    };
-    conv.messages.push(draft);
-    this.transmit(key, draft);
+    });
+    this.transmit(key, nonce);
   }
 
-  private transmit(key: string, m: Msg) {
-    const sent = this.send({ type: "send", to: key, text: m.text, nonce: m.nonce ?? null });
-    const conv = this.convs[key];
-    const live = conv?.messages.find((x) => x.nonce === m.nonce);
-    if (!live) return;
-    live.state = sent ? "pending" : "failed";
+  transmit(key, nonce) {
+    const m = this.convs[key]?.messages.find((x) => x.nonce === nonce);
+    if (!m) return;
+    const sent = this.send({ type: "send", to: key, text: m.text, nonce });
+    m.state = sent ? "pending" : "failed";
     if (sent) {
       setTimeout(() => {
-        const still = this.convs[key]?.messages.find((x) => x.nonce === m.nonce);
+        const still = this.convs[key]?.messages.find((x) => x.nonce === nonce);
         if (still?.state === "pending") still.state = "failed";
       }, PENDING_TIMEOUT);
     }
   }
 
-  retry(key: string, nonce: string) {
-    const m = this.convs[key]?.messages.find((x) => x.nonce === nonce);
-    if (m) this.transmit(key, m);
+  retry(key, nonce) {
+    this.transmit(key, nonce);
   }
 
-  discard(key: string, nonce: string) {
+  discard(key, nonce) {
     const conv = this.convs[key];
     if (conv) conv.messages = conv.messages.filter((m) => m.nonce !== nonce);
   }
 
-  edit(id: number, text: string) {
+  edit(id, text) {
     this.editing = null;
     const trimmed = text.trim();
     if (trimmed) this.send({ type: "edit", id, text: trimmed });
   }
 
-  remove(id: number) {
+  remove(id) {
     this.send({ type: "delete", id });
   }
 
-  lastOwn(key: string): Msg | undefined {
+  lastOwn(key) {
     return this.convs[key]?.messages.findLast((m) => m.author === this.me && !m.state);
   }
 
-  typingIn(key: string): string[] {
+  typingIn(key) {
     const now = Date.now();
     return Object.entries(this.typing[key] ?? {})
       .filter(([, until]) => until > now)
@@ -477,32 +456,32 @@ class Porch {
   }
 
   /** Tell others we're typing, at most every few seconds. */
-  nudgeTyping(key: string) {
+  nudgeTyping(key) {
     const now = Date.now();
     if (now - this.lastTypingSent < 3000) return;
     this.lastTypingSent = now;
     this.send({ type: "typing", to: key });
   }
 
-  createChannel(name: string) {
+  createChannel(name) {
     this.send({ type: "create_channel", name });
   }
 
-  toast(message: string) {
+  toast(message) {
     this.notice = message;
     clearTimeout(this.noticeTimer);
-    this.noticeTimer = setTimeout(() => (this.notice = ""), 5000);
+    this.noticeTimer = setTimeout(() => (this.notice = ""), NOTICE_FOR);
   }
 
-  private send(msg: ClientMessage): boolean {
+  send(msg) {
     return this.conn?.send(msg) ?? false;
   }
 
-  private pruneTyping() {
+  pruneTyping() {
     const now = Date.now();
     for (const [key, who] of Object.entries(this.typing)) {
       for (const [user, until] of Object.entries(who)) {
-        if (until <= now) delete this.typing[key]![user];
+        if (until <= now) delete this.typing[key][user];
       }
     }
   }

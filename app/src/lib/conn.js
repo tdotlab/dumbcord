@@ -1,16 +1,8 @@
 // One WebSocket to the Porch server, kept alive and reconnected with backoff.
-
-import type { ClientMessage } from "./protocol/ClientMessage";
-import type { ServerMessage } from "./protocol/ServerMessage";
-
-export type ConnStatus = "connecting" | "open" | "closed";
-
-export interface ConnHandlers {
-  /** The socket opened; send the sign-in frame now. */
-  open(): void;
-  message(msg: ServerMessage): void;
-  status(status: ConnStatus): void;
-}
+//
+// Status goes "connecting" -> "open" -> "closed" (and round again). The
+// handlers are { open(), message(msg), status(status) }; `open` fires when the
+// socket opens, which is when the sign-in frame should go.
 
 const PING_EVERY = 25_000;
 const SILENCE_LIMIT = 60_000;
@@ -18,17 +10,17 @@ const BACKOFF_MIN = 500;
 const BACKOFF_MAX = 15_000;
 
 export class Connection {
-  private ws: WebSocket | null = null;
-  private stopped = false;
-  private attempts = 0;
-  private retryTimer: ReturnType<typeof setTimeout> | undefined;
-  private pingTimer: ReturnType<typeof setInterval> | undefined;
-  private lastHeard = 0;
+  ws = null;
+  stopped = false;
+  attempts = 0;
+  retryTimer;
+  pingTimer;
+  lastHeard = 0;
 
-  constructor(
-    readonly url: string,
-    private handlers: ConnHandlers,
-  ) {}
+  constructor(url, handlers) {
+    this.url = url;
+    this.handlers = handlers;
+  }
 
   start() {
     this.stopped = false;
@@ -48,16 +40,17 @@ export class Connection {
     ws?.close(1000);
   }
 
-  send(msg: ClientMessage): boolean {
+  /** Send a frame; false if the socket isn't open. */
+  send(msg) {
     if (this.ws?.readyState !== WebSocket.OPEN) return false;
     this.ws.send(JSON.stringify(msg));
     return true;
   }
 
-  private connect() {
+  connect() {
     clearTimeout(this.retryTimer);
     this.handlers.status("connecting");
-    let ws: WebSocket;
+    let ws;
     try {
       ws = new WebSocket(this.url);
     } catch {
@@ -79,7 +72,7 @@ export class Connection {
       if (this.ws !== ws) return;
       this.lastHeard = Date.now();
       try {
-        this.handlers.message(JSON.parse(ev.data as string) as ServerMessage);
+        this.handlers.message(JSON.parse(ev.data));
       } catch (err) {
         console.error("bad frame from server", err);
       }
@@ -93,7 +86,7 @@ export class Connection {
     };
   }
 
-  private keepAlive() {
+  keepAlive() {
     if (Date.now() - this.lastHeard > SILENCE_LIMIT) {
       // The socket looks open but nothing comes back (sleep, Wi-Fi change).
       this.ws?.close();
@@ -102,7 +95,7 @@ export class Connection {
     this.send({ type: "ping" });
   }
 
-  private scheduleRetry() {
+  scheduleRetry() {
     if (this.stopped) return;
     const base = Math.min(BACKOFF_MAX, BACKOFF_MIN * 2 ** this.attempts);
     this.attempts++;
@@ -110,13 +103,13 @@ export class Connection {
     this.retryTimer = setTimeout(() => this.connect(), delay);
   }
 
-  private retryNow = () => {
+  retryNow = () => {
     if (this.stopped || this.ws) return;
     this.attempts = 0;
     this.connect();
   };
 
-  private onVisible = () => {
+  onVisible = () => {
     if (document.visibilityState === "visible") {
       if (this.ws && Date.now() - this.lastHeard > PING_EVERY) this.keepAlive();
       else this.retryNow();
@@ -128,21 +121,21 @@ export class Connection {
  * Turn what someone typed ("porch.example.com", "localhost:7878",
  * "https://x.y/") into a WebSocket URL. Blank means "this page's server".
  */
-export function serverUrl(input: string): string {
+export function serverUrl(input) {
   let raw = input.trim();
   if (!raw) {
     const proto = location.protocol === "https:" ? "wss:" : "ws:";
     return `${proto}//${location.host}/ws`;
   }
   if (!/^[a-z]+:\/\//i.test(raw)) {
-    const hostPart = raw.split(/[/:]/)[0] ?? "";
+    const host = raw.split(/[/:]/)[0] ?? "";
     const local =
-      hostPart === "localhost" ||
-      /^127\./.test(hostPart) ||
-      /^10\./.test(hostPart) ||
-      /^192\.168\./.test(hostPart) ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(hostPart) ||
-      hostPart.endsWith(".local");
+      host === "localhost" ||
+      /^127\./.test(host) ||
+      /^10\./.test(host) ||
+      /^192\.168\./.test(host) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+      host.endsWith(".local");
     raw = `${local ? "ws" : "wss"}://${raw}`;
   }
   const url = new URL(raw);
@@ -150,4 +143,13 @@ export function serverUrl(input: string): string {
   if (url.protocol === "http:") url.protocol = "ws:";
   if (url.pathname === "/" || url.pathname === "") url.pathname = "/ws";
   return url.toString();
+}
+
+/** The host part of a server address, for the status line. */
+export function hostOf(input) {
+  try {
+    return new URL(serverUrl(input)).host;
+  } catch {
+    return input;
+  }
 }

@@ -5,12 +5,8 @@
 //! target is always written from the reader's point of view, so Alice sees her
 //! conversation with Bob as `@bob` and Bob sees the same one as `@alice`; the
 //! server stores both under one internal key.
-//!
-//! `cargo test` regenerates the TypeScript copies of these types in
-//! `app/src/lib/protocol/` (see `.cargo/config.toml`).
 
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
 
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const MAX_TEXT_CHARS: usize = 2000;
@@ -18,9 +14,8 @@ pub const MAX_FRAME_BYTES: usize = 64 * 1024;
 pub const HISTORY_PAGE: usize = 50;
 pub const MAX_SDP_BYTES: usize = 48 * 1024;
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-#[ts(export)]
 pub enum ClientMessage {
     /// Create an account. `invite` is required when the server has one set.
     Register {
@@ -44,7 +39,6 @@ pub enum ClientMessage {
     /// Fetch up to one page of messages older than `before` (newest if null).
     History {
         to: String,
-        #[ts(type = "number | null")]
         before: Option<i64>,
     },
     /// `nonce` is echoed back on the resulting `message` so the sender can
@@ -55,12 +49,10 @@ pub enum ClientMessage {
         nonce: Option<String>,
     },
     Edit {
-        #[ts(type = "number")]
         id: i64,
         text: String,
     },
     Delete {
-        #[ts(type = "number")]
         id: i64,
     },
     Typing {
@@ -69,7 +61,6 @@ pub enum ClientMessage {
     /// Everything in `to` up to and including `id` has been seen.
     MarkRead {
         to: String,
-        #[ts(type = "number")]
         id: i64,
     },
     Ping,
@@ -102,9 +93,8 @@ pub enum ClientMessage {
     VoiceLeave,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-#[ts(export)]
 pub enum ServerMessage {
     /// Sent once after a successful register, login or resume.
     Welcome {
@@ -136,7 +126,6 @@ pub enum ServerMessage {
         message: ChatMessage,
     },
     Deleted {
-        #[ts(type = "number")]
         id: i64,
         to: String,
         author: String,
@@ -158,7 +147,6 @@ pub enum ServerMessage {
     /// Read position changed on another of this user's devices.
     Read {
         to: String,
-        #[ts(type = "number")]
         id: i64,
     },
     Pong,
@@ -183,8 +171,7 @@ pub enum ServerMessage {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VoiceMember {
     pub user: String,
     /// The channel, written `#name`.
@@ -194,8 +181,7 @@ pub struct VoiceMember {
     pub muted: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VoiceTrack {
     pub user: String,
     pub mid: String,
@@ -203,35 +189,27 @@ pub struct VoiceTrack {
 
 /// One message as stored. For a DM, `to` is `@recipient` as the author wrote
 /// it; a client finds the conversation with `author == me ? to : "@" + author`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChatMessage {
-    #[ts(type = "number")]
     pub id: i64,
     pub to: String,
     pub author: String,
     pub text: String,
     /// Unix milliseconds.
-    #[ts(type = "number")]
     pub created_at: i64,
-    #[ts(type = "number | null")]
     pub edited_at: Option<i64>,
 }
 
 /// Where a user stands in one conversation, for unread badges.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ConvState {
     pub to: String,
-    #[ts(type = "number")]
     pub last_id: i64,
-    #[ts(type = "number")]
     pub last_read: i64,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-#[ts(export)]
 pub enum ErrorCode {
     /// The request was malformed or failed validation.
     BadRequest,
