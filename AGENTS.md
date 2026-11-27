@@ -11,7 +11,6 @@
   call its methods; they do not talk to the socket.
 - Keep the server small enough for a 1 GB VPS: no new runtime services, SQLite only,
   bounded queues and rate limits on anything a client can trigger.
-- `dumbcord/` is the retired prototype. Don't build on it.
 
 Validate before committing:
 

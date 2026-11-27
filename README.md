@@ -15,7 +15,6 @@ server one of them runs. It is not trying to be Discord.
 | `app/` | The client: Svelte 5 + TypeScript + Vite |
 | `app/src-tauri/` | Tauri 2 shell that turns the client into a desktop/Android app |
 | `docs/` | Architecture and design notes |
-| `dumbcord/` | The earlier egui prototype, kept for reference until it is removed |
 
 ## Running it locally
 
