@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["server"]
+# The app shell has its own lockfile and build; keep it out of the server workspace.
+exclude = ["app/src-tauri"]
+
+[profile.release]
+lto = "thin"
+strip = true
+
+# Argon2 is painfully slow unoptimized; keep debug builds and tests snappy.
+[profile.dev.package.argon2]
+opt-level = 3
+[profile.dev.package.blake2]
+opt-level = 3

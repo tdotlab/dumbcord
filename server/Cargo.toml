@@ -1,0 +1,28 @@
+[package]
+name = "porch-server"
+version = "0.2.0"
+edition = "2021"
+description = "Porch chat server: WebSocket protocol, SQLite history, accounts"
+license = "MIT"
+
+[dependencies]
+anyhow = "1.0.105"
+argon2 = { version = "0.5", features = ["std"] }
+axum = { version = "0.8.9", features = ["ws"] }
+clap = { version = "4.6.10", features = ["derive", "env"] }
+futures-util = { version = "0.3.34", default-features = false, features = ["sink", "std"] }
+hex = "0.4.3"
+rand = "0.8"
+rusqlite = { version = "0.43.0", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.2"
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal"] }
+tower-http = { version = "0.7.1", features = ["fs"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+ts-rs = { version = "12.0.1", features = ["no-serde-warnings"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
+tokio-tungstenite = "0.30.0"
