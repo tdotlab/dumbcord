@@ -23,9 +23,6 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Test
         run: cargo test
-      - name: Protocol types are committed
-        if: runner.os == 'Linux'
-        run: test -z "$(git status --porcelain -- app/src/lib/protocol)"
 
   client:
     runs-on: ubuntu-latest

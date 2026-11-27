@@ -405,6 +405,9 @@ async fn a_stalled_client_is_dropped_without_freezing_anyone() {
     let s = start(
         Limits {
             queue: 8,
+            // Out of reach, so only the full queue can drop the stalled client,
+            // however fast or slow the machine is.
+            write_timeout: Duration::from_secs(600),
             ..fast_limits()
         },
         None,

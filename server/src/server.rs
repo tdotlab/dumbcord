@@ -218,18 +218,19 @@ async fn session(app: Arc<App>, socket: WebSocket) {
 
     let writer_kill = kill.clone();
     let mut writer = tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                biased;
-                _ = writer_kill.notified() => break,
-                next = rx.recv() => {
-                    let Some(text) = next else { break };
+        // The kill signal races the whole loop, not just the wait for the next
+        // frame: a client that has fallen behind is usually stuck mid-send.
+        tokio::select! {
+            biased;
+            _ = writer_kill.notified() => {}
+            _ = async {
+                while let Some(text) = rx.recv().await {
                     match timeout(write_timeout, sink.send(Message::Text(text))).await {
                         Ok(Ok(())) => {}
                         _ => break,
                     }
                 }
-            }
+            } => {}
         }
         let _ = timeout(Duration::from_secs(2), sink.close()).await;
     });
